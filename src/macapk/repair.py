@@ -589,6 +589,249 @@ def _action_ds_store_prevent():
     return {'ok': True, 'msg': '.DS_Store op netwerk/USB voorkomen: ingeschakeld'}
 
 
+# ═══════════════════════════════════════════════════════════════
+# RAM NEUTRALIZER — slim geheugen vrijmaken
+# ═══════════════════════════════════════════════════════════════
+
+# Processen die NOOIT afgesloten mogen worden (macOS essentieel)
+PROTECTED_PROCESSES = {
+    # macOS kern
+    'kernel_task', 'launchd', 'loginwindow', 'WindowServer', 'Dock',
+    'Finder', 'SystemUIServer', 'System Preferences', 'Activity Monitor',
+    'securityd', 'keychaind', 'cfprefsd', 'coreservicesd', 'coreauthd',
+    'opendirectoryd', 'notifyd', 'distnoted', 'dock_extra', 'traild',
+    'Terminal', 'bash', 'zsh', 'sh', 'fish', 'python3', 'python', 'node',
+    # Systeemdiensten
+    'mds', 'mdworker', 'mdworker_shared', 'mds_stores', 'mds_bg',
+    'appleaccountsd', 'cloudd', 'cloudphotod', 'com.apple.Photo',
+    'identityservicesd', 'nsurlsessiond', 'rapportd', 'symptomsd',
+    'syspolicyd', 'tccd', 'unmountd', 'warmd', 'wirelessproxd',
+    'bluetoothd', 'CoreBluetooth', 'IOBluetooth',
+    # Netwerk
+    'configd', 'mDNSResponder', 'netbiosd', 'ndproxyd', 'ppp',
+    'racoon', 'vpnplugin', 'wirelessproxd',
+    # GPU/Display
+    'GPUCompositor', 'GPUSession', 'MTLCompilerService',
+    # MacAPK zelf
+    'MacAPK', 'macapk',
+    # Hermes
+    'hermes', 'hermes-tui',
+    # Gebruikersapps — NOOIT afsluiten
+    'Comet', 'Safari', 'Chrome', 'Firefox', 'Vivaldi', 'Brave', 'Edge',
+    'Code', 'Cursor', 'Xcode', 'iTerm', 'Terminal',
+    'LM Studio', 'lm-studio', 'ollama', 'Ollama',
+    'sirittsd', 'Siri', 'Tailscale', 'tailscale', 'ipn',
+    'Discord', 'Telegram', 'Slack', 'Spotify', 'VLC',
+    'Messages', 'FaceTime', 'Mail', 'Notes', 'Reminders', 'Calendar',
+    'Preview', 'TextEdit', 'Archive Utility', 'App Store',
+    'Software Update', 'softwareupdated', 'softwareupdate',
+    'logd', 'mobileassetd', 'mediaanalysisd',
+    'Spotlight', 'spotlight', 'mds', 'corespotlightd', 'Perplexity', 'perplexityd',
+    'ControlCenter', 'controlcenter', 'SystemUIServer',
+}
+
+# Processen die beschermd zijn als ze tot een protected bundle behoren
+_PROTECTED_BUNDLE_IDS = set()  # lazy loaded
+
+
+def _get_protected_bundle_ids():
+    """Lazy load protected bundle IDs from app protection list."""
+    global _PROTECTED_BUNDLE_IDS
+    if _PROTECTED_BUNDLE_IDS:
+        return _PROTECTED_BUNDLE_IDS
+    # Essential app bundles that should never be killed
+    essential = [
+        'com.apple.Safari', 'com.apple.mail', 'com.apple.iChat',
+        'com.apple.Terminal', 'com.apple.ActivityMonitor',
+        'com.apple.systempreferences', 'com.apple.Notes',
+        'com.apple.reminders', 'com.apple.calendar',
+        'com.apple.finder', 'com.apple.dock',
+        'com.apple.AppleFileServer', 'com.apple.ScreenSharing',
+        'com.vivaldi.Vivaldi', 'com.google.Chrome', 'org.mozilla.firefox',
+        'com.brave.Browser', 'com.microsoft.VSCode',
+        'com.apple.dt.Xcode', 'com.googlecode.iterm2',
+        'com.macapk.systeemcheck',
+    ]
+    _PROTECTED_BUNDLE_IDS = set(essential)
+    return _PROTECTED_BUNDLE_IDS
+
+
+def _action_ram_neutralize():
+    """RAM Neutralizer: sluit niet-essentiële achtergrondprocessen af om RAM vrij te maken.
+
+    Scan alle processen, identificeer hoge-RAM niet-essentiële achtergrondprocessen,
+    en sluit ze af (SIGTERM → SIGKILL na 3s).
+    Beschermt alle bekende systeem-, browser-, IDE- en gebruikersapps.
+    """
+    import signal
+
+    # KILLABLE achtergrondprocessen — alleen dit soort processen mogen afgesloten worden
+    # Dit zijn typische "helper" / "renderer" / "cache" processen die automatisch herstarten
+    KILLABLE_PATTERNS = {
+        # Browser helpers (automatisch herstart bij web_activiteit)
+        'Helper (Renderer)', 'Helper (GPU)', 'Helper (Plugin)', 'Helper (Network)',
+        'WebKit.WebContent', 'WebKit.Networking', 'WebKit.WebProcess',
+        # Dev tools helpers (herstarten automatisch)
+        'Code Helper', 'Cursor Helper',
+        # Media/indexing achtergrond
+        'mediaanalysisd', 'corespotlightd', 'mdworker',
+        # Overige killable achtergronddiensten
+        'Perplexity Helper', 'perplexityd',
+    }
+
+    try:
+        # Measure RAM before cleanup
+        ram_before = _get_ram_usage()
+
+        # Haal proceslijst op met RAM per proces
+        result = subprocess.run(
+            ['ps', '-eo', 'pid,rss,comm'],
+            capture_output=True, text=True, timeout=10
+        )
+        if not result.stdout:
+            return {'ok': False, 'msg': 'Kon proceslijst niet ophalen'}
+
+        # Verzamel killable achtergrondprocessen met >30MB RAM
+        candidates = []
+        for line in result.stdout.splitlines()[1:]:
+            parts = line.strip().split(None, 2)
+            if len(parts) < 3:
+                continue
+            pid_str, rss_str, comm = parts
+            try:
+                pid = int(pid_str)
+                rss_kb = int(rss_str)
+            except ValueError:
+                continue
+
+            rss_mb = rss_kb / 1024
+            if rss_mb < 30:  # skip < 30MB
+                continue
+
+            # Basisnaam (laatste deel van pad)
+            basename = os.path.basename(comm)
+            proc_name = basename if basename else comm
+
+            # NOOIT killsen: systeemprocessen, low PIDs, protected apps
+            name_lower = proc_name.lower()
+            is_protected = False
+
+            # Kernel processen
+            if pid <= 50:
+                is_protected = True
+
+            # Protected names check
+            for p in PROTECTED_PROCESSES:
+                if p.lower() in name_lower or name_lower in p.lower():
+                    is_protected = True
+                    break
+
+            if is_protected:
+                continue
+
+            # Alleen killen als het een KILLABLE pattern matcht
+            is_killable = False
+            for pattern in KILLABLE_PATTERNS:
+                if pattern.lower() in name_lower:
+                    is_killable = True
+                    break
+
+            if not is_killable:
+                continue
+
+            candidates.append({
+                'pid': pid,
+                'name': proc_name,
+                'ram_mb': round(rss_mb, 1),
+            })
+
+        if not candidates:
+            return {
+                'ok': True,
+                'msg': 'Geen killable achtergrondprocessen gevonden. Systeem is schoon!',
+                'freed_mb': 0,
+                'killed': [],
+                'protected_count': len(PROTECTED_PROCESSES),
+            }
+
+        # Sorteer op RAM gebruik (hoogste eerst)
+        candidates.sort(key=lambda x: x['ram_mb'], reverse=True)
+
+        # Beëindig processen (SIGTERM eerst, dan SIGKILL)
+        killed = []
+        failed = []
+
+        for proc in candidates:
+            try:
+                # Eerst vriendelijk SIGTERM
+                os.kill(proc['pid'], signal.SIGTERM)
+                time.sleep(0.3)
+
+                # Check of proces nog leeft
+                try:
+                    os.kill(proc['pid'], 0)  # signal 0 = check alive
+                    # Nog alive → wacht en probeer SIGKILL
+                    time.sleep(2)
+                    try:
+                        os.kill(proc['pid'], 0)
+                        os.kill(proc['pid'], signal.SIGKILL)
+                        time.sleep(0.5)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                except (ProcessLookupError, PermissionError):
+                    pass  # proces is al dood (goed!)
+
+                killed.append(proc)
+            except (ProcessLookupError, PermissionError):
+                failed.append(proc)
+
+        # Meet RAM na cleanup
+        ram_after = _get_ram_usage()
+        freed = max(0, ram_before - ram_after) if ram_before > 0 else sum(p['ram_mb'] for p in killed)
+
+        # Format resultaat
+        kill_names = [f"{p['name']} ({p['ram_mb']}MB)" for p in killed[:6]]
+        more = f" +{len(killed)-6} meer" if len(killed) > 6 else ""
+
+        return {
+            'ok': True,
+            'msg': f'{len(killed)} achtergrondprocessen afgesloten ({freed:.0f} MB vrijgemaakt){more}',
+            'freed_mb': round(freed, 1),
+            'killed': killed[:6],
+            'failed_count': len(failed),
+            'candidates_found': len(candidates),
+            'protected_count': len(PROTECTED_PROCESSES),
+        }
+    except Exception as e:
+        return {'ok': False, 'msg': f'Fout: {e}'}
+
+
+def _get_ram_usage():
+    """Get current RAM usage in MB."""
+    try:
+        result = subprocess.run(['sysctl', 'hw.memsize'], capture_output=True, text=True, timeout=5)
+        total_bytes = int(result.stdout.split()[-1])
+        total_mb = total_bytes / 1048576
+
+        # Get used memory via vm_stat
+        result = subprocess.run(['vm_stat'], capture_output=True, text=True, timeout=5)
+        pages_free = 0
+        pages_used = 0
+        page_size = 16384  # Apple Silicon
+        for line in result.stdout.splitlines():
+            if 'Pages free' in line or 'Pages speculative' in line:
+                val = int(line.split(':')[1].strip().rstrip('.'))
+                pages_free += val
+            if 'Pages active' in line or 'Pages wired' in line:
+                val = int(line.split(':')[1].strip().rstrip('.'))
+                pages_used += val
+
+        used_mb = (pages_used * page_size) / 1048576 if pages_used > 0 else total_mb * 0.5
+        return round(used_mb, 1)
+    except Exception:
+        return 0
+
+
 ACTIONS = [
     Action('zombies', 'Zombies opruimen', '🧟', 'Beëindig zombieprocessen', _action_zombies),
     Action('memory_purge', 'Geheugen vrijmaken', '🧠', 'Maakt geheugencache vrij (sudo purge)', _action_memory_purge, requires_sudo=True),
@@ -606,6 +849,7 @@ ACTIONS = [
     Action('quarantine_clean', 'Quarantaine wissen', '🛡️', 'Download-quarantaine database leegmaken', _action_quarantine_clean),
     Action('notifications_clean', 'Notificaties opruimen', '🔔', 'Oude notificaties verwijderen (>30 dagen)', _action_notification_clean),
     Action('ds_store_prevent', '.DS_Store voorkomen', '📄', 'Voorkom .DS_Store op netwerk/USB', _action_ds_store_prevent),
+    Action('ram_neutralize', 'RAM Neutralizer', '⚡', 'Sluit niet-essentiële processen af (RAM vrijmaken)', _action_ram_neutralize),
 ]
 
 
