@@ -116,7 +116,7 @@ def generate_report(check_result, trends=None):
     status_icon = {'groen': '✅', 'geel': '⚠️', 'rood': '❌'}.get(status, 'ℹ️')
     
     lines = [
-        f'# MacAPK Keuringsrapport',
+        f'# MacAPK Rapport',
         f'',
         f'**Datum:** {datetime.now().strftime("%d-%m-%Y %H:%M")}',
         f'',
@@ -144,6 +144,6 @@ def generate_report(check_result, trends=None):
         lines.append('')
     
     lines.append('---')
-    lines.append('*MacAPK — De APK Keuring voor je Mac*')
+    lines.append('*MacAPK — Systeemcheck voor je Mac*')
     
     return '\n'.join(lines)

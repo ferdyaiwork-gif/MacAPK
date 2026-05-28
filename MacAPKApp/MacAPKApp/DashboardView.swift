@@ -95,7 +95,7 @@ struct DashboardView: View {
             Button {
                 appState.runCheck()
             } label: {
-                Label("Keuring", systemImage: "magnifyingglass")
+                Label("Controleren", systemImage: "magnifyingglass")
                     .font(.caption)
             }
             .buttonStyle(.borderedProminent)
@@ -143,7 +143,7 @@ struct DashboardView: View {
     
     var statusText: String {
         switch appState.status {
-        case "groen": return "Goedgekeurd ✅"
+        case "groen": return "Soepel ✅"
         case "geel": return "Waarschuwing ⚠️"
         case "rood": return "Kritiek 🚨"
         default: return "Laden..."

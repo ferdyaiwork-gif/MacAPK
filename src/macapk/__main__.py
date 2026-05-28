@@ -29,10 +29,10 @@ def open_browser(url):
 
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description='MacAPK — De keuring voor je Mac')
+    parser = argparse.ArgumentParser(description='MacAPK — Systeemcheck voor je Mac')
     parser.add_argument('--host', default='127.0.0.1', help='Host (default: 127.0.0.1)')
     parser.add_argument('--port', type=int, default=8899, help='Port (default: 8899)')
-    parser.add_argument('--no-auto', action='store_true', help='Geen automatische keuring')
+    parser.add_argument('--no-auto', action='store_true', help='Geen automatische check')
     parser.add_argument('--no-browser', action='store_true', help='Geen browser openen')
     args = parser.parse_args()
 

@@ -9,8 +9,13 @@ import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-# Add parent path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Add project paths for imports
+_src = Path(__file__).resolve().parent
+if (_src.name == 'api' and (_src.parent.name == 'macapk')):
+    # Development: src/macapk/api/ → add src/
+    sys.path.insert(0, str(_src.parent.parent))
+else:
+    sys.path.insert(0, str(_src))
 
 from macapk.engine import run_check, calculate_score
 from macapk.repair import get_available_repairs, run_repair, run_all_repairs, run_toggle, get_toggles
@@ -27,16 +32,17 @@ DB_PATH = os.path.expanduser('~/.macapk/history.db')
 # UI directory: check multiple locations
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _env_ui = os.environ.get('MACAPK_UI_DIR')
-_candidate_dirs = [
+_candidates = [
     Path(_env_ui) if _env_ui else None,              # env override (PyInstaller)
     _SCRIPT_DIR.parent.parent / 'ui',                 # development: src/macapk/api/../../ui = ui/
     _SCRIPT_DIR.parent / 'ui',                        # bundled: Resources/ui/
     Path(sys._MEIPASS) / 'ui' if getattr(sys, '_MEIPASS', None) else None,  # PyInstaller
     Path(os.getcwd()) / 'ui',                         # cwd/ui
+    Path('/Users/ferdy/projects/MacAPK/ui'),           # default project path
     Path('/Applications/MacAPK.app/Contents/Resources/ui'),  # installed
 ]
-_candidate_dirs = [d for d in _candidate_dirs if d is not None]
-UI_DIR = str(next((d for d in _candidate_dirs if d.exists()), _candidate_dirs[0]))
+_candidates = [d for d in _candidates if d is not None]
+UI_DIR = str(next((d for d in _candidates if d.exists()), _candidates[0]))
 
 
 class MacAPKHandler(BaseHTTPRequestHandler):
@@ -76,7 +82,7 @@ class MacAPKHandler(BaseHTTPRequestHandler):
             self._send_file(os.path.join(UI_DIR, 'index.html'), 'text/html')
         elif path == '/api/status':
             with _cached_lock:
-                self._send_json(_cached_result or {'status': 'no_data', 'message': 'Geen keuring beschikbaar. Voer een keuring uit.'})
+                self._send_json(_cached_result or {'status': 'no_data', 'message': 'Geen check beschikbaar. Voer een check uit.'})
         elif path == '/api/history':
             hours = 24
             try:
@@ -101,15 +107,17 @@ class MacAPKHandler(BaseHTTPRequestHandler):
             with _cached_lock:
                 self._send_json(_cached_result or {'status': 'no_data'})
         elif path == '/api/repairs':
-            # GET /api/repairs — list available toggles/repairs based on latest check
-            with _cached_lock:
-                toggles = get_available_repairs(_cached_result or {})
-            self._send_json({'repairs': toggles})
+            # GET /api/repairs — list available actions
+            actions = get_available_repairs()
+            self._send_json({'repairs': actions})
         elif path == '/api/toggles':
             # GET /api/toggles — list all toggles with current state
-            with _cached_lock:
-                toggles = get_toggles(_cached_result or {})
+            toggles = get_toggles()
             self._send_json({'toggles': toggles})
+        elif path == '/api/cleanup-estimate':
+            # GET /api/cleanup-estimate — estimate freeable space
+            from macapk.repair import get_cleanup_estimate
+            self._send_json(get_cleanup_estimate())
         else:
             # Serve static files from UI dir
             filepath = os.path.join(UI_DIR, path.lstrip('/'))
@@ -136,19 +144,16 @@ class MacAPKHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({'error': str(e), 'status': 'error'}, 500)
         elif self.path == '/api/repair':
-            # POST /api/repair — run a specific repair, toggle, or all repairs
+            # POST /api/repair — run a specific action, toggle, or all
             content_len = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_len) if content_len else b''
             try:
                 params = json.loads(body) if body else {}
                 repair_id = params.get('id', '')
-                action = params.get('action', 'on')  # 'on', 'off', or 'run'
-                
-                with _cached_lock:
-                    check_data = _cached_result or {}
-                
+                action_type = params.get('action', 'run')  # 'on', 'off', or 'run'
+
                 if repair_id == 'all':
-                    results = run_all_repairs(check_data)
+                    results = run_all_repairs()
                     new_check = run_check()
                     with _cached_lock:
                         _cached_result = new_check
@@ -156,15 +161,12 @@ class MacAPKHandler(BaseHTTPRequestHandler):
                     db.save(new_check)
                     self._send_json({'repairs': results, 'new_check': new_check})
                 elif repair_id:
-                    # Check if it's a toggle or one-time action
-                    from macapk.repair import TOGGLES
-                    toggle = TOGGLES.get(repair_id)
-                    if toggle and not toggle.get('is_action', False):
-                        # It's a real toggle — use 'on' or 'off'
-                        result = run_toggle(repair_id, action, check_data)
+                    # Check if it's a toggle or action
+                    toggle_ids = [t.id for t in __import__('macapk.repair', fromlist=['TOGGLES']).TOGGLES]
+                    if repair_id in toggle_ids and action_type in ('on', 'off'):
+                        result = run_toggle(repair_id, action_type)
                     else:
-                        # It's a one-time action
-                        result = run_repair(repair_id, check_data)
+                        result = run_repair(repair_id)
                     # Re-run check after action
                     new_check = run_check()
                     with _cached_lock:
@@ -173,7 +175,7 @@ class MacAPKHandler(BaseHTTPRequestHandler):
                     db.save(new_check)
                     self._send_json({'repair': result, 'new_check': new_check})
                 else:
-                    self._send_json({'error': 'Geen reparatie-ID opgegeven'}, 400)
+                    self._send_json({'error': 'Geen ID opgegeven'}, 400)
             except Exception as e:
                 self._send_json({'error': str(e)}, 500)
         else:
@@ -213,7 +215,7 @@ def run_server(host='127.0.0.1', port=8899, auto=True):
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
     # Run initial check
-    print('MacAPK — Eerste keuring uitvoeren...')
+    print('MacAPK — Eerste systeemcheck uitvoeren...')
     try:
         result = run_check()
         global _cached_result
@@ -221,9 +223,9 @@ def run_server(host='127.0.0.1', port=8899, auto=True):
             _cached_result = result
         db = HistoryDB(DB_PATH)
         db.save(result)
-        print(f'Keuring voltooid: {result["scores"]["overall"]}/100 ({result["scores"]["overall_status"]})')
+        print(f'Systeemcheck voltooid: {result["scores"]["overall"]}/100 ({result["scores"]["overall_status"]})')
     except Exception as e:
-        print(f'Fout bij eerste keuring: {e}', file=sys.stderr)
+        print(f'Fout bij eerste systeemcheck: {e}', file=sys.stderr)
 
     # Start auto-check background thread
     if auto:
@@ -245,7 +247,7 @@ def run_server(host='127.0.0.1', port=8899, auto=True):
 
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description='MacAPK — De keuring voor je Mac')
+    parser = argparse.ArgumentParser(description='MacAPK — Systeemcheck voor je Mac')
     parser.add_argument('--host', default='127.0.0.1', help='Host (default: 127.0.0.1)')
     parser.add_argument('--port', type=int, default=8899, help='Port (default: 8899)')
     parser.add_argument('--no-auto', action='store_true', help='Disable auto-check')
