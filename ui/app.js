@@ -225,6 +225,8 @@ async function runCheck(showLoading = true) {
         await loadTrends();
         loadHistory();
         showMachineInfo(data);
+        // Also load available repairs
+        loadRepairs();
     } catch (e) {
         console.error(e);
         errBanner.textContent = `Fout bij keuring: ${e.message}`;
@@ -404,3 +406,156 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 window.addEventListener('resize', () => { if (currentData) loadHistory(); });
+
+// ─── Repairs ─────────────────────────────────────────────
+async function loadRepairs() {
+    try {
+        const resp = await fetch(`${API}/api/repairs`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderRepairs(data.repairs);
+    } catch (e) {
+        console.error('Fout bij laden reparaties:', e);
+    }
+}
+
+function renderRepairs(repairs) {
+    const card = document.getElementById('repairCard');
+    const list = document.getElementById('repairList');
+    const allBtn = document.getElementById('repairAllBtn');
+    
+    if (!repairs || repairs.length === 0) {
+        card.style.display = 'none';
+        return;
+    }
+    
+    card.style.display = 'block';
+    list.innerHTML = '';
+    
+    repairs.forEach(r => {
+        const item = document.createElement('div');
+        item.className = 'repair-item';
+        item.id = `repair-${r.id}`;
+        const severityClass = r.severity === 'critical' ? 'critical' : r.severity === 'warning' ? 'warning' : 'info';
+        const severityLabel = r.severity === 'critical' ? 'Kritiek' : r.severity === 'warning' ? 'Waarschuwing' : 'Info';
+        
+        item.innerHTML = `
+            <div class="repair-icon">${r.icon}</div>
+            <div class="repair-info">
+                <div class="repair-name">${r.name}</div>
+                <div class="repair-desc">${r.description}</div>
+                <span class="repair-severity ${severityClass}">${severityLabel}</span>
+            </div>
+            <button class="btn-repair-single" onclick="repairSingle('${r.id}')" id="btn-repair-${r.id}">
+                🔧 Fix
+            </button>
+        `;
+        list.appendChild(item);
+    });
+    
+    allBtn.style.display = repairs.length > 1 ? 'flex' : 'none';
+}
+
+async function repairSingle(repairId) {
+    const btn = document.getElementById(`btn-repair-${repairId}`);
+    if (btn.disabled) return;
+    
+    btn.disabled = true;
+    btn.className = 'btn-repair-single running';
+    btn.textContent = '⏳ Bezig...';
+    
+    try {
+        const resp = await fetch(`${API}/api/repair`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: repairId })
+        });
+        const data = await resp.json();
+        
+        const result = data.repair || data;
+        const item = document.getElementById(`repair-${repairId}`);
+        
+        // Show result
+        let outputHtml = '';
+        if (result.success === true || result.already_fixed) {
+            btn.className = 'btn-repair-single done';
+            btn.textContent = result.already_fixed ? '✅ Al gefikst' : '✅ Gerepareerd';
+            outputHtml = `<div class="repair-output success">${result.already_fixed ? '✅ Al opgelost!' : (result.output || '✅ Succesvol gerepareerd!')}</div>`;
+        } else if (result.requires_sudo) {
+            btn.className = 'btn-repair-single failed';
+            btn.textContent = '🔒 Sudo nodig';
+            outputHtml = `
+                <div class="repair-output sudo">
+                    ⚠️ Vereist beheerdersrechten (sudo).<br>
+                    Kopieer dit commando naar Terminal:<br>
+                    <span class="repair-manual">${result.sudo_command || result.manual_command || ''}</span>
+                </div>`;
+        } else {
+            btn.className = 'btn-repair-single failed';
+            btn.textContent = '❌ Mislukt';
+            outputHtml = `<div class="repair-output failed">❌ ${result.error || result.message || 'Reparatie mislukt'}</div>`;
+            // Also show manual instruction if available
+            if (result.manual_description || result.manual_command) {
+                outputHtml += `<div class="repair-output sudo">💡 Handmatig: ${result.manual_description || ''}<br>${result.manual_command ? `<span class="repair-manual">${result.manual_command}</span>` : ''}</div>`;
+            }
+        }
+        
+        // Add output after the repair-info div
+        const infoDiv = item.querySelector('.repair-info');
+        infoDiv.insertAdjacentHTML('afterend', outputHtml);
+        
+        // If there's new check data, update the dashboard
+        if (data.new_check) {
+            currentData = data.new_check;
+            updateScore(data.new_check.scores.overall, data.new_check.scores.overall_status);
+            renderKeuring(data.new_check);
+            renderModules(data.new_check);
+            updateStatus(data.new_check);
+            // Reload repairs in case some are now fixed
+            setTimeout(loadRepairs, 1000);
+        }
+    } catch (e) {
+        btn.className = 'btn-repair-single failed';
+        btn.textContent = '❌ Fout';
+        console.error('Repair error:', e);
+    }
+}
+
+async function repairAll() {
+    const allBtn = document.getElementById('repairAllBtn');
+    if (allBtn.disabled) return;
+    
+    allBtn.disabled = true;
+    allBtn.textContent = '⏳ Alle reparaties uitvoeren...';
+    
+    try {
+        const resp = await fetch(`${API}/api/repair`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: 'all' })
+        });
+        const data = await resp.json();
+        
+        if (data.repairs) {
+            let successCount = data.repairs.filter(r => r.success).length;
+            let total = data.repairs.length;
+            allBtn.textContent = `✅ ${successCount}/${total} gerepareerd`;
+            allBtn.className = 'btn-repair-all';
+        }
+        
+        // Update dashboard with new check data
+        if (data.new_check) {
+            currentData = data.new_check;
+            updateScore(data.new_check.scores.overall, data.new_check.scores.overall_status);
+            renderKeuring(data.new_check);
+            renderModules(data.new_check);
+            updateStatus(data.new_check);
+        }
+        
+        // Reload repairs
+        setTimeout(loadRepairs, 1500);
+    } catch (e) {
+        allBtn.textContent = '❌ Fout bij repareren';
+        console.error('Repair all error:', e);
+    }
+}

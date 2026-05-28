@@ -266,6 +266,61 @@ select.history-select {
 .acties-card.verplicht li::before { content: '🚨'; position: absolute; left: 0; }
 .acties-card.aanbevolen li::before { content: '💡'; position: absolute; left: 0; }
 
+/* ─── Repair buttons ────────────────────────────────────── */
+.acties-card.reparatie { border-color: rgba(88,166,255,0.4); background: rgba(88,166,255,0.04); }
+.repair-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; margin-bottom: 8px;
+    background: rgba(255,255,255,0.03); border-radius: 10px;
+    border: 1px solid var(--border); transition: var(--transition);
+}
+.repair-item:hover { background: rgba(255,255,255,0.06); }
+.repair-item .repair-icon { font-size: 20px; flex-shrink: 0; }
+.repair-item .repair-info { flex: 1; }
+.repair-item .repair-name { font-size: 14px; font-weight: 600; }
+.repair-item .repair-desc { font-size: 12px; color: var(--text-secondary); }
+.repair-item .repair-severity {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 2px 8px; border-radius: 10px;
+}
+.repair-item .repair-severity.critical { background: rgba(248,81,73,0.15); color: var(--red); }
+.repair-item .repair-severity.warning { background: rgba(210,153,34,0.15); color: var(--yellow); }
+.repair-item .repair-severity.info { background: rgba(88,166,255,0.15); color: var(--accent); }
+.btn-repair-single {
+    padding: 6px 14px; border-radius: 8px; border: none; cursor: pointer;
+    font-size: 12px; font-weight: 600; transition: var(--transition);
+    background: linear-gradient(135deg, #238636, #2ea043); color: #fff;
+    white-space: nowrap; font-family: inherit;
+}
+.btn-repair-single:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(46,160,67,0.4); }
+.btn-repair-single:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn-repair-single.running { background: var(--yellow); color: #000; }
+.btn-repair-single.done { background: var(--green); }
+.btn-repair-single.failed { background: var(--red); }
+.btn-repair-all {
+    width: 100%; padding: 12px 20px; border-radius: 10px; border: none; cursor: pointer;
+    font-size: 14px; font-weight: 700; transition: var(--transition);
+    background: linear-gradient(135deg, #58a6ff, #388bfd); color: #fff;
+    display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px;
+    font-family: inherit;
+    box-shadow: 0 4px 16px rgba(88,166,255,0.3);
+}
+.btn-repair-all:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(88,166,255,0.5); }
+.btn-repair-all:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.repair-output {
+    margin-top: 6px; padding: 6px 10px; border-radius: 8px;
+    background: rgba(255,255,255,0.03); font-size: 11.5px; color: var(--text-secondary);
+    line-height: 1.4;
+}
+.repair-output.success { border-left: 3px solid var(--green); }
+.repair-output.failed { border-left: 3px solid var(--red); }
+.repair-output.sudo { border-left: 3px solid var(--yellow); }
+.repair-manual {
+    margin-top: 4px; font-size: 11px; color: var(--accent);
+    font-family: 'SF Mono', monospace; background: rgba(88,166,255,0.08);
+    padding: 4px 8px; border-radius: 6px; display: inline-block;
+}
+
 /* ─── Score Row (secondary) ────────────────────────────── */
 .score-row { display: flex; align-items: flex-start; gap: 24px; padding: 0 28px 8px; }
 .score-mini { text-align: center; flex-shrink: 0; }
