@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""MacAPK — Startup script."""
+import sys
+import os
+
+# Add src directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
+
+from macapk.api.server import run_server
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='MacAPK — De keuring voor je Mac')
+    parser.add_argument('--host', default='127.0.0.1', help='Host (default: 127.0.0.1)')
+    parser.add_argument('--port', type=int, default=8899, help='Port (default: 8899)')
+    parser.add_argument('--no-auto', action='store_true', help='Geen automatische keuring')
+    args = parser.parse_args()
+    run_server(host=args.host, port=args.port, auto=not args.no_auto)
