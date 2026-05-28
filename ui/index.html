@@ -9,18 +9,18 @@
 <body>
 <div class="loading-overlay" id="loadingOverlay">
     <div class="spinner large"></div>
-    <div class="loading-text">Systeemkeuring uitvoeren…</div>
+    <div class="loading-text">Keuring uitvoeren…</div>
 </div>
 <div class="error-banner" id="errorBanner"></div>
 
 <header class="header">
     <div class="header-left">
-        <div class="logo">🔧</div>
+        <div class="logo">🛡️</div>
         <h1>MacAPK<small>De keuring voor je Mac</small></h1>
     </div>
     <div class="header-right">
         <button class="btn btn-secondary" onclick="toggleAuto()" id="autoBtn">⏱ Auto: Aan</button>
-        <button class="btn btn-secondary" onclick="exportReport()">📄 Rapport</button>
+        <button class="btn btn-secondary" onclick="exportReport()">📄 Keuringsrapport</button>
         <button class="btn btn-primary" onclick="runCheck()" id="checkBtn">🔍 Keuring Uitvoeren</button>
     </div>
 </header>
@@ -32,23 +32,53 @@
     <span id="machineInfo" style="margin-left:auto; opacity:0.7;"></span>
 </div>
 
-<div class="score-hero" id="scoreHero">
-    <div class="score-circle">
-        <svg viewBox="0 0 200 200">
-            <circle class="bg-ring" cx="100" cy="100" r="85"/>
-            <circle class="score-ring" id="scoreArc" cx="100" cy="100" r="85"
-                stroke-dasharray="534" stroke-dashoffset="534" stroke="#58a6ff"/>
-        </svg>
-        <div class="score-value">
-            <div class="score-number" id="scoreNumber">--</div>
-            <div class="score-of">van 100</div>
-        </div>
+<!-- APK KEURING CARD — the main verdict -->
+<div class="keuring-hero" id="keuringHero">
+    <div class="keuring-sticker" id="keuringSticker">
+        <div class="sticker-icon" id="stickerIcon">⏳</div>
+        <div class="sticker-text" id="stickerText">WACHTEN</div>
     </div>
-    <div class="score-status" id="scoreStatus" style="color:var(--text-secondary);">WACHTEN</div>
+    <div class="keuring-details">
+        <div class="keuring-verdict" id="keuringVerdict">Keuring wordt uitgevoerd…</div>
+        <div class="keuring-date" id="keuringDate"></div>
+        <div class="keuring-summary" id="keuringSummary"></div>
+    </div>
 </div>
 
-<div class="modules-grid" id="modulesGrid">
-    <div class="empty-state"><div class="icon">🔧</div><p>Wachten op eerste keuring…</p></div>
+<!-- Rubrics grid — like real APK inspection points -->
+<div class="rubrics-grid" id="rubricsGrid">
+    <div class="empty-state"><div class="icon">🛡️</div><p>Wachten op keuring…</p></div>
+</div>
+
+<!-- Verplichte & Aanbevolen acties -->
+<div class="acties-section" id="actiesSection" style="display:none;">
+    <div class="acties-card verplicht" id="verplichtCard" style="display:none;">
+        <h3>🚨 Verplichte Acties — MOET je fixen!</h3>
+        <ul id="verplichtList"></ul>
+    </div>
+    <div class="acties-card aanbevolen" id="aanbevolenCard" style="display:none;">
+        <h3>⚠️ Aanbevolen Acties</h3>
+        <ul id="aanbevolenList"></ul>
+    </div>
+</div>
+
+<!-- Original score circle (smaller, secondary) -->
+<div class="score-row" id="scoreRow" style="display:none;">
+    <div class="score-mini">
+        <div class="score-circle small">
+            <svg viewBox="0 0 200 200">
+                <circle class="bg-ring" cx="100" cy="100" r="85"/>
+                <circle class="score-ring" id="scoreArc" cx="100" cy="100" r="85"
+                    stroke-dasharray="534" stroke-dashoffset="534" stroke="#58a6ff"/>
+            </svg>
+            <div class="score-value">
+                <div class="score-number" id="scoreNumber">--</div>
+                <div class="score-of">/100</div>
+            </div>
+        </div>
+        <div class="score-label">Numerieke score</div>
+    </div>
+    <div class="modules-compact" id="modulesCompact"></div>
 </div>
 
 <div class="history-section">

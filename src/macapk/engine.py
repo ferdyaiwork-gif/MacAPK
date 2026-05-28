@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""MacAPK — Main engine: orchestrates collectors, scoring, and diagnosis."""
+"""MacAPK — Main engine: orchestrates collectors, scoring, and diagnosis.
+Echte APK-keuring: GOEDGEKEURD, GOED MET OPMERKINGEN, or AFGEKEURD."""
 
 import json
 import time
@@ -23,6 +24,114 @@ COLLECTORS = {
     'processes': collect_processes,
 }
 
+# ─── Keuring verdicts ──────────────────────────────────────────
+VERDICT_GOEDGEKEURD = 'GOEDGEKEURD'        # Groen sticker — alles in orde
+VERDICT_GOED_MET_OPMERKINGEN = 'GOED MET OPMERKINGEN'  # Geel sticker — werkt, maar aandachtspunten
+VERDICT_AFGEKEURD = 'AFGEKEURD'              # Rood sticker — onveilig/instabiel
+
+# ─── Keuring rubrics ────────────────────────────────────────────
+# Each rubric has: name, critical thresholds, and mandatory checks
+RUBRICS = {
+    'remmen': {  # CPU = remmen (moeten goed reageren)
+        'name_nl': 'Remmen (CPU)',
+        'icon': '🛑',
+        'critical_fail': [  # Any of these = AFGEKEURD
+            ('cpu_percent', '>', 95, 'CPU overbelast: systeem reageert nauwelijks'),
+        ],
+        'warnings': [
+            ('cpu_percent', '>', 70, 'CPU belasting hoog — remmen slepen'),
+            ('cpu_temp_c', '>', 85, 'CPU oververhit — remmen oververhit'),
+            ('cpu_load_avg_1m', '>', 6, 'Systeemload structureel te hoog'),
+        ],
+        'ok_msg': 'Remmen (CPU) functioneren goed',
+    },
+    'vering': {  # RAM = vering (moet dempen)
+        'name_nl': 'Vering (Geheugen)',
+        'icon': '🔧',
+        'critical_fail': [
+            ('ram_percent', '>', 97, 'Geheugen kritiek vol — systeem onstabiel'),
+        ],
+        'warnings': [
+            ('ram_percent', '>', 80, 'Geheugen belasting verhoogd'),
+            ('swap_used_gb', '>', 4, 'Swap actief — vering hard'),
+            ('memory_pressure', '==', 'critical', 'Geheugendruk kritiek'),
+        ],
+        'ok_msg': 'Vering (RAM) veert soepel',
+    },
+    'banden': {  # Disk = banden (moet profiel hebben)
+        'name_nl': 'Banden (Opslag)',
+        'icon': '🛞',
+        'critical_fail': [
+            ('disk_pct_root', '>', 97, 'Systeemschijf bijna vol — banden glad'),
+        ],
+        'warnings': [
+            ('disk_pct_root', '>', 85, 'Opslagruimte neemt af — banden versleten'),
+            ('disk_pct_data', '>', 90, 'Dataschijf vol aan het raken'),
+        ],
+        'ok_msg': 'Banden (opslag) voldoende profiel',
+    },
+    'licht': {  # Security = verlichting (moet werken)
+        'name_nl': 'Verlichting (Beveiliging)',
+        'icon': '💡',
+        'critical_fail': [
+            ('sip_enabled', '==', False, 'SIP uitgeschakeld — verlichting defect!'),
+            ('gatekeeper_enabled', '==', False, 'Gatekeeper uit — koplamp defect!'),
+        ],
+        'warnings': [
+            ('filevault_enabled', '==', False, 'FileVault uit — geen mistlicht'),
+            ('firewall_enabled', '==', False, 'Firewall uit — geen knipperlicht'),
+            ('updates_available', '>', 0, 'Updates beschikbaar — lampje brandt'),
+        ],
+        'ok_msg': 'Verlichting (beveiliging) compleet en functioneel',
+    },
+    'uitlaat': {  # Network = uitlaat (moet doorstroming hebben)
+        'name_nl': 'Uitlaat (Netwerk)',
+        'icon': '💨',
+        'critical_fail': [],
+        'warnings': [
+            ('dns_response_ms', '>', 200, 'DNS traag — uitlaat verstopt'),
+            ('firewall_enabled', '==', False, 'Geen firewall — uitlaat lek'),
+        ],
+        'ok_msg': 'Uitlaat (netwerk) doorstroming goed',
+    },
+    'motor': {  # GPU + Sensors = motor
+        'name_nl': 'Motor (GPU/Sensoren)',
+        'icon': '⚡',
+        'critical_fail': [
+            ('thermal_pressure', '==', 'critical', 'Thermisch kritiek — motor oververhit!'),
+        ],
+        'warnings': [
+            ('gpu_usage_percent', '>', 80, 'GPU zwaar belast'),
+            ('uptime_hours', '>', 720, 'Uptime > 30 dagen — motor draait lang zonder onderhoud'),
+        ],
+        'ok_msg': 'Motor (GPU/sensoren) draait soepel',
+    },
+    'accu': {  # Battery = accu
+        'name_nl': 'Accu',
+        'icon': '🔋',
+        'critical_fail': [
+            ('battery_health_pct', '<', 50, 'Accugezondheid slecht — vervanging nodig'),
+        ],
+        'warnings': [
+            ('battery_health_pct', '<', 80, 'Accugezondheid matig'),
+            ('cycle_count', '>', 500, 'Accu veel laadcycli'),
+        ],
+        'ok_msg': 'Accu in goede staat',
+    },
+    'carrosserie': {  # Processes = carrosserie
+        'name_nl': 'Carrosserie (Processen)',
+        'icon': '🚗',
+        'critical_fail': [
+            ('zombie_count', '>', 10, 'Te veel zombieprocessen — carrosserie roestig'),
+        ],
+        'warnings': [
+            ('process_count', '>', 600, 'Veel processen — veel extra gewicht'),
+            ('zombie_count', '>', 0, 'Zombieprocessen aanwezig'),
+        ],
+        'ok_msg': 'Carrosserie (processen) strak en schoon',
+    },
+}
+
 
 def _safe_collect(name, func):
     try:
@@ -43,6 +152,30 @@ def collect_all():
         results[name] = data
     return results
 
+
+def _val(d, *keys, default=0):
+    """Try multiple keys, return first non-None numeric value."""
+    for k in keys:
+        v = d.get(k)
+        if v is not None and isinstance(v, (int, float)):
+            return v
+    return default
+
+
+def _bval(d, *keys, default=None):
+    """Try multiple keys, return first non-None bool value."""
+    for k in keys:
+        v = d.get(k)
+        if v is not None and isinstance(v, bool):
+            return v
+    return default
+
+
+def _st(score):
+    return 'groen' if score >= 75 else 'geel' if score >= 45 else 'rood'
+
+
+# ─── Numeric scores (for backward compat / dashboard) ───────────
 
 def calculate_score(modules):
     scores = {}
@@ -71,24 +204,189 @@ def calculate_score(modules):
     return {'overall': overall, 'overall_status': overall_status, 'modules': scores}
 
 
-def _st(score):
-    return 'groen' if score >= 75 else 'geel' if score >= 45 else 'rood'
+# ─── APK Keuring (the real deal) ────────────────────────────────
 
-def _val(d, *keys, default=0):
-    """Try multiple keys, return first non-None numeric value."""
-    for k in keys:
-        v = d.get(k)
-        if v is not None and isinstance(v, (int, float)):
-            return v
-    return default
+def _get_nested_val(data, key_path):
+    """Get a value from module data by key name, handling nested dicts."""
+    if '.' in key_path:
+        parts = key_path.split('.', 1)
+        sub = data.get(parts[0])
+        if isinstance(sub, dict):
+            return _get_nested_val(sub, parts[1])
+        return None
+    return data.get(key_path)
 
-def _bval(d, *keys, default=None):
-    """Try multiple keys, return first non-None bool value."""
-    for k in keys:
-        v = d.get(k)
-        if v is not None and isinstance(v, bool):
-            return v
-    return default
+
+def _compare(actual, operator, threshold):
+    """Compare a value against a threshold."""
+    if actual is None:
+        return False
+    if operator == '>': return actual > threshold
+    if operator == '<': return actual < threshold
+    if operator == '==': return actual == threshold
+    if operator == '>=': return actual >= threshold
+    if operator == '<=': return actual <= threshold
+    return False
+
+
+def _extract_rubric_values(modules, rubric_key):
+    """Extract values from module data for rubric checks."""
+    # Map rubric keys to module data
+    mapping = {
+        'cpu_percent': ('cpu', 'cpu_percent'),
+        'cpu_temp_c': ('cpu', 'cpu_temp_c'),
+        'cpu_load_avg_1m': ('cpu', None),  # special: first element of load_avg
+        'ram_percent': ('ram', 'ram_percent'),
+        'swap_used_gb': ('ram', 'swap_used_gb'),
+        'memory_pressure': ('ram', 'memory_pressure'),
+        'disk_pct_root': ('disk', None),  # special: root disk %
+        'disk_pct_data': ('disk', None),  # special: data disk %
+        'sip_enabled': ('security', 'sip_enabled'),
+        'gatekeeper_enabled': ('security', 'gatekeeper_enabled'),
+        'filevault_enabled': ('security', 'filevault_enabled'),
+        'firewall_enabled': ('security', 'firewall_enabled'),
+        'updates_available': ('security', 'updates_available'),
+        'dns_response_ms': ('network', 'dns_response_ms'),
+        'gpu_usage_percent': ('gpu', 'gpu_usage_percent'),
+        'thermal_pressure': ('sensors', 'thermal_pressure'),
+        'uptime_hours': ('sensors', 'uptime_hours'),
+        'battery_health_pct': ('battery', 'battery_health_pct'),
+        'cycle_count': ('battery', 'cycle_count'),
+        'zombie_count': ('processes', 'zombie_count'),
+        'process_count': ('processes', 'process_count'),
+    }
+    
+    result = {}
+    for key, (module_name, data_key) in mapping.items():
+        mod = modules.get(module_name, {})
+        if 'error' in mod and len(mod) <= 2:
+            result[key] = None
+            continue
+        
+        if key == 'cpu_load_avg_1m':
+            load = mod.get('cpu_load_avg', [])
+            result[key] = load[0] if isinstance(load, list) and len(load) > 0 else None
+        elif key == 'disk_pct_root':
+            disks = mod.get('disks', [])
+            root_pct = None
+            for d in disks:
+                if isinstance(d, dict) and d.get('mountpoint') == '/':
+                    root_pct = d.get('percent')
+                    break
+            result[key] = root_pct
+        elif key == 'disk_pct_data':
+            disks = mod.get('disks', [])
+            data_pct = None
+            for d in disks:
+                if isinstance(d, dict) and 'Data' in str(d.get('mountpoint', '')):
+                    data_pct = d.get('percent')
+                    break
+            result[key] = data_pct
+        elif data_key:
+            result[key] = mod.get(data_key)
+        else:
+            result[key] = None
+    
+    return result
+
+
+def run_keuring(modules):
+    """Run the full APK keuring — like a real Dutch car inspection."""
+    rubric_results = {}
+    critical_count = 0
+    warning_count = 0
+    all_ok = True
+    
+    for rubric_key, rubric in RUBRICS.items():
+        values = _extract_rubric_values(modules, rubric_key)
+        
+        findings = []  # ('critical'|'warning'|'ok', message)
+        has_critical = False
+        
+        # Check critical failures
+        for field, op, threshold, msg in rubric['critical_fail']:
+            actual = values.get(field)
+            if actual is not None and _compare(actual, op, threshold):
+                findings.append(('critical', msg))
+                has_critical = True
+                all_ok = False
+            elif actual is None and op == '==' and threshold is False:
+                # Boolean False check: if field doesn't exist, treat as False
+                findings.append(('critical', msg))
+                has_critical = True
+                all_ok = False
+        
+        # Check warnings
+        for field, op, threshold, msg in rubric['warnings']:
+            actual = values.get(field)
+            if actual is not None and _compare(actual, op, threshold):
+                findings.append(('warning', f'⚠️ {msg}'))
+                warning_count += 1
+                all_ok = False
+            elif actual is None and op == '==' and threshold is False:
+                findings.append(('warning', f'⚠️ {msg}'))
+                warning_count += 1
+                all_ok = False
+        
+        if has_critical:
+            critical_count += 1
+            verdict = 'AFGEKEURD'
+            verdict_icon = '❌'
+        elif findings:
+            verdict = 'GOED MET OPMERKINGEN'
+            verdict_icon = '⚠️'
+        else:
+            verdict = 'GOEDGEKEURD'
+            verdict_icon = '✅'
+        
+        rubric_results[rubric_key] = {
+            'name': rubric['name_nl'],
+            'icon': rubric['icon'],
+            'verdict': verdict,
+            'verdict_icon': verdict_icon,
+            'findings': findings if findings else [('ok', rubric['ok_msg'])],
+        }
+    
+    # ─── Overall verdict ────────────────────────────────────
+    if critical_count > 0:
+        overall_verdict = VERDICT_AFGEKEURD
+        overall_icon = '❌'
+        sticker = 'ROOD'
+    elif warning_count > 0:
+        overall_verdict = VERDICT_GOED_MET_OPMERKINGEN
+        overall_icon = '⚠️'
+        sticker = 'GEEL'
+    else:
+        overall_verdict = VERDICT_GOEDGEKEURD
+        overall_icon = '✅'
+        sticker = 'GROEN'
+    
+    # ─── Verplichte acties (things that MUST be fixed) ───────
+    verplichte_acties = []
+    aanbevolen_acties = []
+    
+    for rubric_key, result in rubric_results.items():
+        for level, msg in result['findings']:
+            if level == 'critical':
+                verplichte_acties.append(f"{result['icon']} {result['name']}: {msg}")
+            elif level == 'warning':
+                aanbevolen_acties.append(f"{result['icon']} {result['name']}: {msg}")
+    
+    return {
+        'keuring_datum': datetime.now().strftime('%d-%m-%Y'),
+        'keuring_tijd': datetime.now().strftime('%H:%M'),
+        'overall_verdict': overall_verdict,
+        'overall_icon': overall_icon,
+        'sticker': sticker,
+        'critical_count': critical_count,
+        'warning_count': warning_count,
+        'verplichte_acties': verplichte_acties,
+        'aanbevolen_acties': aanbevolen_acties,
+        'rubrics': rubric_results,
+    }
+
+
+# ─── Legacy numeric scorers (unchanged) ────────────────────────
 
 def _score_generic(data):
     return 75, 'geel', ['Geen specifieke scoring']
@@ -100,17 +398,14 @@ def _score_cpu(data):
     elif cpu_pct > 70: score -= 20; d.append(f'CPU hoog: {cpu_pct:.1f}%')
     elif cpu_pct > 50: score -= 8; d.append(f'CPU matig: {cpu_pct:.1f}%')
     else: d.append(f'CPU rustig: {cpu_pct:.1f}')
-
     load1 = _val(data, 'cpu_load_avg_1m', default=None)
     if load1 is None and isinstance(data.get('cpu_load_avg'), list) and len(data['cpu_load_avg']) > 0:
         load1 = data['cpu_load_avg'][0]
     if load1 and load1 > 4: score -= 15; d.append(f'Load average hoog: {load1:.1f}')
-
     temp = _val(data, 'cpu_temp_c', 'temperature')
     if temp > 90: score -= 30; d.append(f'CPU erg heet: {temp:.0f}°C')
     elif temp > 75: score -= 15; d.append(f'CPU warm: {temp:.0f}°C')
     elif temp > 0: d.append(f'CPU koel: {temp:.0f}°C')
-
     if not d: d.append('CPU optimaal')
     return max(0, min(100, score)), _st(score), d
 
@@ -149,7 +444,7 @@ def _score_disk(data):
         for disk in disks:
             if isinstance(disk, dict):
                 pct = _val(disk, 'percent', default=0)
-                mount = disk.get('mount', disk.get('device', '?'))
+                mount = disk.get('mount', disk.get('mountpoint', '?'))
                 if pct > 95: score -= 30; d.append(f'Schijf {mount} bijna vol: {pct:.1f}%')
                 elif pct > 85: score -= 15; d.append(f'Schijf {mount}: {pct:.1f}%')
     avail = _val(data, 'available_gb')
@@ -229,8 +524,11 @@ def _score_security(data):
 
 
 def run_check():
+    """Run full check: collectors + scores + keuring."""
     modules = collect_all()
     scores = calculate_score(modules)
+    keuring = run_keuring(modules)
+    
     return {
         'timestamp': datetime.now().isoformat(),
         'macapk_version': '1.0.0',
@@ -238,6 +536,7 @@ def run_check():
         'overall_status': scores['overall_status'],
         'modules': modules,
         'scores': scores,
+        'keuring': keuring,
     }
 
 

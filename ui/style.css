@@ -172,10 +172,123 @@ select.history-select {
 .empty-state { text-align: center; padding: 60px 24px; color: var(--text-secondary); grid-column: 1 / -1; }
 .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
 
+/* ─── APK Keuring Hero ─────────────────────────────────── */
+.keuring-hero {
+    display: flex; align-items: center; gap: 28px;
+    padding: 28px 32px; margin: 18px 28px 0;
+    background: var(--bg-card); border: 2px solid var(--border);
+    border-radius: 18px; position: relative; overflow: hidden;
+}
+.keuring-hero::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 20% 50%, rgba(88,166,255,0.06), transparent 60%);
+    pointer-events: none;
+}
+.keuring-sticker {
+    width: 130px; height: 130px; border-radius: 50%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-weight: 800; flex-shrink: 0; position: relative; z-index: 1;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    transition: all 0.6s cubic-bezier(0.4,0,0.2,1);
+}
+.keuring-sticker.groen {
+    background: linear-gradient(135deg, #238636, #2ea043);
+    border: 4px solid #3fb950;
+}
+.keuring-sticker.geel {
+    background: linear-gradient(135deg, #9e6a03, #bb8009);
+    border: 4px solid #d29922;
+}
+.keuring-sticker.rood {
+    background: linear-gradient(135deg, #da3633, #f85149);
+    border: 4px solid #f85149;
+}
+.keuring-sticker.wachten {
+    background: linear-gradient(135deg, #30363d, #484f58);
+    border: 4px solid #484f58;
+}
+.sticker-icon { font-size: 42px; line-height: 1; }
+.sticker-text { font-size: 13px; color: #fff; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 4px; }
+.keuring-details { flex: 1; position: relative; z-index: 1; }
+.keuring-verdict { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 4px; }
+.keuring-verdict.groen { color: var(--green); }
+.keuring-verdict.geel { color: var(--yellow); }
+.keuring-verdict.rood { color: var(--red); }
+.keuring-date { font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; }
+.keuring-summary { font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+
+/* ─── Rubrics Grid (APK-style) ────────────────────────── */
+.rubrics-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 14px; padding: 18px 28px;
+}
+.rubric-card {
+    background: var(--bg-card); border: 2px solid var(--border);
+    border-radius: var(--radius); padding: 16px 18px; transition: var(--transition);
+    position: relative; overflow: hidden;
+}
+.rubric-card.goedgekeurd { border-color: rgba(63,185,80,0.4); }
+.rubric-card.goed-met-opmerkingen { border-color: rgba(210,153,34,0.4); }
+.rubric-card.afgekeurd { border-color: rgba(248,81,73,0.4); }
+.rubric-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px var(--shadow); }
+.rubric-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.rubric-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; }
+.rubric-verdict {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+    padding: 3px 10px; border-radius: 20px;
+}
+.rubric-verdict.goedgekeurd { background: rgba(63,185,80,0.15); color: var(--green); }
+.rubric-verdict.goed-met-opmerkingen { background: rgba(210,153,34,0.15); color: var(--yellow); }
+.rubric-verdict.afgekeurd { background: rgba(248,81,73,0.15); color: var(--red); }
+.rubric-findings { list-style: none; }
+.rubric-findings li {
+    font-size: 12.5px; padding: 4px 0; color: var(--text-secondary);
+    display: flex; align-items: flex-start; gap: 6px; line-height: 1.4;
+}
+.rubric-findings li.critical { color: var(--red); font-weight: 600; }
+.rubric-findings li.warning { color: var(--yellow); }
+.rubric-findings li.ok { color: var(--green); }
+
+/* ─── Acties ──────────────────────────────────────────── */
+.acties-section { padding: 0 28px; }
+.acties-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 22px; margin-bottom: 14px;
+}
+.acties-card.verplicht { border-color: rgba(248,81,73,0.4); background: rgba(248,81,73,0.06); }
+.acties-card.aanbevolen { border-color: rgba(210,153,34,0.4); background: rgba(210,153,34,0.06); }
+.acties-card h3 { font-size: 15px; margin-bottom: 10px; }
+.acties-card ul { list-style: none; }
+.acties-card li {
+    font-size: 13.5px; padding: 5px 0; line-height: 1.5;
+    padding-left: 18px; position: relative;
+}
+.acties-card.verplicht li::before { content: '🚨'; position: absolute; left: 0; }
+.acties-card.aanbevolen li::before { content: '💡'; position: absolute; left: 0; }
+
+/* ─── Score Row (secondary) ────────────────────────────── */
+.score-row { display: flex; align-items: flex-start; gap: 24px; padding: 0 28px 8px; }
+.score-mini { text-align: center; flex-shrink: 0; }
+.score-circle.small { width: 120px; height: 120px; }
+.score-circle.small .score-number { font-size: 32px; }
+.score-circle.small .score-of { font-size: 10px; }
+.score-label { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+.modules-compact { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; }
+.module-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    background: var(--bg-card); border: 1px solid var(--border);
+}
+.module-chip.groen { border-color: rgba(63,185,80,0.3); color: var(--green); }
+.module-chip.geel { border-color: rgba(210,153,34,0.3); color: var(--yellow); }
+.module-chip.rood { border-color: rgba(248,81,73,0.3); color: var(--red); }
+
 @media (max-width: 800px) {
-    .modules-grid { grid-template-columns: 1fr; padding: 14px 16px; }
+    .modules-grid, .rubrics-grid { grid-template-columns: 1fr; padding: 14px 16px; }
     .header { padding: 12px 16px; }
     .history-section { padding: 0 16px 16px; }
+    .keuring-hero { flex-direction: column; text-align: center; padding: 20px 16px; margin: 14px 16px 0; }
     .score-hero { padding: 20px 16px 12px; }
     .status-bar { padding: 6px 16px; flex-wrap: wrap; gap: 10px; }
+    .score-row { flex-direction: column; align-items: center; }
 }
