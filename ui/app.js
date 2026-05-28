@@ -261,16 +261,36 @@ async function handleAction(id, btn) {
 }
 
 function showActionResult(result, btn) {
-    const icon = result.ok ? '✅' : '⚪';
+    const icon = result.ok ? '✅' : (result.sudo_command ? '🔒' : '⚪');
     const msg = result.msg || 'Klaar';
+    const sudo = result.sudo_command ? `\n📋 ${result.sudo_command}` : '';
     if (btn) {
         btn.innerHTML = `${icon} ${msg}`;
+        btn.title = sudo ? result.sudo_command : '';
         btn.classList.remove('running');
         setTimeout(() => {
             btn.innerHTML = '⚡ Uitvoeren';
             btn.disabled = false;
-        }, 3000);
+        }, 4000);
     }
+    // Show toast for sudo commands
+    if (result.sudo_command) {
+        showToast(`🔒 Kopieer dit commando:\n${result.sudo_command}`, 6000);
+    }
+}
+
+function showToast(message, duration = 3000) {
+    let toast = document.getElementById('toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'toast';
+        toast.className = 'toast';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.style.whiteSpace = 'pre-wrap';
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), duration);
 }
 
 // ─── Resize handler ────────────────────────────────────────

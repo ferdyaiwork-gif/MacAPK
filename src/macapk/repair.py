@@ -149,6 +149,14 @@ def safe_clean_dir(directory, max_age_days=7, dry_run=False):
     return {'cleaned': cleaned, 'freed_mb': round(freed, 1), 'errors': errors}
 
 
+def _sudo_needed(cmd, extra=''):
+    """Helper: return standardized sudo-required response."""
+    msg = f'Sudo nodig: `{cmd}`'
+    if extra:
+        msg += f' ({extra})'
+    return {'ok': False, 'msg': msg, 'sudo_command': cmd}
+
+
 def _run(cmd, timeout=30):
     """Run shell command and return output."""
     try:
@@ -222,21 +230,25 @@ def _get_firewall():
 
 def _set_firewall_on():
     r = _run('sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on')
-    return {'ok': r.get('ok', False), 'msg': 'Firewall ingeschakeld' if r.get('ok') else f"Sudo nodig: `sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on`"}
+    if r.get('ok'):
+        return {'ok': True, 'msg': 'Firewall ingeschakeld'}
+    return _sudo_needed('sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on')
 
 def _set_firewall_off():
     r = _run('sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off')
-    return {'ok': r.get('ok', False), 'msg': 'Firewall uitgeschakeld' if r.get('ok') else f"Sudo nodig: `sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off`"}
+    if r.get('ok'):
+        return {'ok': True, 'msg': 'Firewall uitgeschakeld'}
+    return _sudo_needed('sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off')
 
 def _get_gatekeeper():
     r = _run('spctl --status 2>/dev/null')
     return 'enabled' in r.get('output', '').lower() if r.get('ok') else None
 
 def _set_gatekeeper_on():
-    return {'ok': False, 'msg': 'Sudo nodig: `sudo spctl --master-enable`'}
+    return _sudo_needed('sudo spctl --master-enable')
 
 def _set_gatekeeper_off():
-    return {'ok': False, 'msg': 'Sudo nodig: `sudo spctl --master-disable` (niet aanbevolen!)'}
+    return _sudo_needed('sudo spctl --master-disable', 'niet aanbevolen!')
 
 def _get_stealth():
     r = _run('sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode 2>/dev/null || echo "unknown"')
@@ -246,10 +258,10 @@ def _get_stealth():
     return None
 
 def _set_stealth_on():
-    return {'ok': False, 'msg': 'Sudo nodig: `sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode on`'}
+    return _sudo_needed('sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode on')
 
 def _set_stealth_off():
-    return {'ok': False, 'msg': 'Sudo nodig: `sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode off`'}
+    return _sudo_needed('sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode off')
 
 
 TOGGLES = [
@@ -285,7 +297,7 @@ def _action_memory_purge():
     r = _run('sudo purge')
     if r.get('ok'):
         return {'ok': True, 'msg': 'Geheugencache vrijgemaakt'}
-    return {'ok': False, 'msg': 'Sudo nodig: `sudo purge`'}
+    return _sudo_needed('sudo purge')
 
 
 def _action_clean_system_caches():
@@ -332,14 +344,22 @@ def _action_clean_user_caches():
         r = safe_clean_dir(d, max_age_days=age)
         total_cleaned += r.get('cleaned', 0)
         total_freed += r.get('freed_mb', 0)
-    # .DS_Store files
-    for p in glob.glob(os.path.join(home, '**/.DS_Store'), recursive=True):
-        depth = p.replace(home, '').count('/')
-        if depth <= 5 and not is_protected(p):
-            r = safe_delete(p)
-            if r.get('ok'):
-                total_cleaned += 1
-                total_freed += r.get('size_mb', 0)
+    # .DS_Store files (limit search depth to avoid scanning entire home)
+    _ds_dirs = [
+        os.path.join(home, 'Desktop'),
+        os.path.join(home, 'Documents'),
+        os.path.join(home, 'Downloads'),
+    ]
+    for ds_dir in _ds_dirs:
+        if not os.path.isdir(ds_dir):
+            continue
+        for p in glob.glob(os.path.join(ds_dir, '**/.DS_Store'), recursive=True):
+            depth = p.replace(ds_dir, '').count('/')
+            if depth <= 3 and not is_protected(p):
+                r = safe_delete(p)
+                if r.get('ok'):
+                    total_cleaned += 1
+                    total_freed += r.get('size_mb', 0)
 
     return {'ok': True, 'msg': f'{total_cleaned} items opgeschoond ({total_freed:.1f} MB vrijgemaakt)', 'freed_mb': total_freed}
 
@@ -358,7 +378,7 @@ def _action_clean_dev_caches():
         ('uv', 'uv cache prune 2>/dev/null', 'uv cache'),
     ]
     for name, cmd, label in dev_commands:
-        r = _run(cmd, timeout=60)
+        r = _run(cmd, timeout=15)
         results.append(f"{'✅' if r.get('ok') else '⚪'} {label}")
 
     # Xcode
@@ -475,7 +495,7 @@ def _action_dns_flush():
     r = _run('sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder')
     if r.get('ok'):
         return {'ok': True, 'msg': 'DNS-cache gewist'}
-    return {'ok': False, 'msg': 'Sudo nodig: `sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`'}
+    return _sudo_needed('sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder')
 
 
 def _action_spotlight_rebuild():
@@ -483,7 +503,7 @@ def _action_spotlight_rebuild():
     r = _run('sudo mdutil -E /')
     if r.get('ok'):
         return {'ok': True, 'msg': 'Spotlight-index wordt herbouwd'}
-    return {'ok': False, 'msg': 'Sudo nodig: `sudo mdutil -E /`'}
+    return _sudo_needed('sudo mdutil -E /')
 
 
 def _action_launchservices_rebuild():
@@ -500,7 +520,7 @@ def _action_periodic_maint():
     r = _run('sudo periodic daily weekly monthly', timeout=120)
     if r.get('ok'):
         return {'ok': True, 'msg': 'Periodiek onderhoud uitgevoerd'}
-    return {'ok': False, 'msg': 'Sudo nodig: `sudo periodic daily weekly monthly`'}
+    return _sudo_needed('sudo periodic daily weekly monthly')
 
 
 def _action_network_reset():
@@ -508,7 +528,7 @@ def _action_network_reset():
     r = _run('sudo route -n flush && sudo arp -a -d 2>/dev/null')
     if r.get('ok'):
         return {'ok': True, 'msg': 'Netwerkstack gereset'}
-    return {'ok': False, 'msg': 'Sudo nodig: `sudo route -n flush && sudo arp -a -d`'}
+    return _sudo_needed('sudo route -n flush && sudo arp -a -d')
 
 
 def _action_quicklook_cache():
