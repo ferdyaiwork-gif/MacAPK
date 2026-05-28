@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""MacAPK — Reparateur: automatic fix actions for common issues.
-Each repair returns {action, description, success, output, requires_sudo}."""
+"""MacAPK — Reparateur: toggle switches for system settings.
+Each toggle can be turned ON or OFF by the user. Not forced, user chooses."""
 
 import subprocess
 import os
-import shutil
 import json
 from datetime import datetime
 
@@ -34,121 +33,117 @@ def _run_sudo(cmd, timeout=60):
     return {'action': cmd, 'success': rc == 0, 'output': out or err, 'requires_sudo': False}
 
 
-# ─── Repair definitions ─────────────────────────────────────────
-# Each repair knows: what it fixes, how to check if needed, and how to fix it
+# ─── Toggle definitions ──────────────────────────────────────────
+# Each toggle: name, icon, description, how to check current state, how to set ON/OFF
 
-REPAIRS = {
-    'filevault': {
-        'name': 'FileVault aanzetten',
-        'icon': '🔐',
-        'category': 'verlichting',  # maps to keuring rubric
-        'severity': 'warning',
-        'description': 'Schijfversleuteling inschakelen voor veiligheid',
-        'check': lambda data: not data.get('modules', {}).get('security', {}).get('filevault_enabled', True),
-        'fix': lambda: _run_sudo('fdesetup enable -defer'),
-        'manual_command': 'sudo fdesetup enable',
-        'manual_description': 'Open Systeeminstellingen → Privacy & Beveiliging → FileVault',
-    },
+TOGGLES = {
     'firewall': {
-        'name': 'Firewall aanzetten',
+        'name': 'Firewall',
         'icon': '🧱',
         'category': 'verlichting',
-        'severity': 'warning',
-        'description': 'MacOS-firewall inschakelen voor netwerkveiligheid',
-        'check': lambda data: not data.get('modules', {}).get('security', {}).get('firewall_enabled', True),
-        'fix': lambda: _run_sudo('/usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on'),
-        'manual_command': 'sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on',
-        'manual_description': 'Open Systeeminstellingen → Netwerk → Firewall',
+        'description': 'Blokkeert ongewenste netwerkverbindingen',
+        'current_state': lambda data: data.get('modules', {}).get('security', {}).get('firewall_enabled', None),
+        'turn_on': lambda: _run_sudo('/usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on'),
+        'turn_off': lambda: _run_sudo('/usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off'),
+        'on_command': 'sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on',
+        'off_command': 'sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off',
+        'requires_sudo': True,
     },
     'gatekeeper': {
-        'name': 'Gatekeeper aanzetten',
+        'name': 'Gatekeeper',
         'icon': '🚧',
         'category': 'verlichting',
-        'severity': 'critical',
-        'description': 'Gatekeeper inschakelen om alleen vertrouwde apps toe te staan',
-        'check': lambda data: not data.get('modules', {}).get('security', {}).get('gatekeeper_enabled', True),
-        'fix': lambda: _run_sudo('spctl --master-enable'),
-        'manual_command': 'sudo spctl --master-enable',
-        'manual_description': 'Open Systeeminstellingen → Privacy & Beveiliging → Gatekeeper',
+        'description': 'Controleert of apps uit vertrouwde bronnen komen',
+        'current_state': lambda data: data.get('modules', {}).get('security', {}).get('gatekeeper_enabled', None),
+        'turn_on': lambda: _run_sudo('spctl --master-enable'),
+        'turn_off': lambda: _run_sudo('spctl --master-disable'),
+        'on_command': 'sudo spctl --master-enable',
+        'off_command': 'sudo spctl --master-disable',
+        'requires_sudo': True,
     },
     'sip': {
-        'name': 'SIP inschakelen (herstart nodig)',
+        'name': 'SIP (System Integrity Protection)',
         'icon': '🛡️',
         'category': 'verlichting',
-        'severity': 'critical',
-        'description': 'System Integrity Protection herstellen — vereist herstart in Herstelmodus',
-        'check': lambda data: not data.get('modules', {}).get('security', {}).get('sip_enabled', True),
-        'fix': lambda: {'action': 'csrutil enable', 'success': False, 'requires_sudo': True,
-                        'message': 'Start op in Herstelmodus (Cmd+R bij opstarten), open Terminal en voer uit: csrutil enable'},
-        'manual_command': 'csrutil enable (in Herstelmodus)',
-        'manual_description': 'Herstart → hou Cmd+R ingedrukt → Terminal → csrutil enable',
+        'description': 'Beschermt systeembestanden tegen wijziging',
+        'current_state': lambda data: data.get('modules', {}).get('security', {}).get('sip_enabled', None),
+        'turn_on': lambda: {'success': False, 'requires_sudo': True, 'message': 'Herstart in Herstelmodus (Cmd+R), open Terminal, voer uit: csrutil enable', 'sudo_command': 'csrutil enable (in Herstelmodus)'},
+        'turn_off': lambda: {'success': False, 'requires_sudo': True, 'message': 'Herstart in Herstelmodus (Cmd+R), open Terminal, voer uit: csrutil disable', 'sudo_command': 'csrutil disable (in Herstelmodus)'},
+        'on_command': 'csrutil enable (in Herstelmodus)',
+        'off_command': 'csrutil disable (in Herstelmodus)',
+        'requires_sudo': True,
+        'requires_recovery': True,
     },
     'zombie_cleanup': {
         'name': 'Zombieprocessen opruimen',
         'icon': '🧟',
         'category': 'carrosserie',
-        'severity': 'warning',
-        'description': 'Zombieprocessen verwijderen die geheugen blokkeren',
-        'check': lambda data: data.get('modules', {}).get('processes', {}).get('zombie_count', 0) > 0,
-        'fix': lambda: _fix_zombies(),
-        'manual_command': None,
-        'manual_description': 'Zombies worden automatisch opgeruimd door hun parent-processen',
+        'description': 'Ruimt zombieprocessen op die geheugen blokkeren',
+        'current_state': lambda data: data.get('modules', {}).get('processes', {}).get('zombie_count', 0) == 0,
+        'turn_on': lambda: _fix_zombies(),  # "on" = clean them up
+        'turn_off': lambda: {'success': True, 'output': 'Geen actie nodig — zombies verdwijnen vanzelf'},
+        'on_command': None,
+        'off_command': None,
+        'is_action': True,  # This is a one-time action, not a persistent toggle
     },
     'memory_cleanup': {
         'name': 'Geheugen vrijmaken',
         'icon': '🧠',
         'category': 'vering',
-        'severity': 'warning',
-        'description': 'Cache geheugen vrijmaken en purgeable memory ophogen',
-        'check': lambda data: data.get('modules', {}).get('ram', {}).get('ram_percent', 0) > 75,
-        'fix': lambda: _fix_memory(),
-        'manual_command': None,
-        'manual_description': 'Sluit zware apps of herstart je Mac',
+        'description': 'Maakt cache-geheugen vrij voor betere prestaties',
+        'current_state': lambda data: data.get('modules', {}).get('ram', {}).get('ram_percent', 0) < 75,
+        'turn_on': lambda: _fix_memory(),
+        'turn_off': lambda: {'success': True, 'output': 'Geheugen wordt vanzelf vrijgemaakt'},
+        'on_command': None,
+        'off_command': None,
+        'is_action': True,  # One-time action
     },
     'disk_cleanup': {
         'name': 'Opslag ruimen',
         'icon': '💾',
         'category': 'banden',
-        'severity': 'warning',
-        'description': 'Cache, logs en tijdelijke bestanden verwijderen',
-        'check': lambda data: any(
-            d.get('percent', 0) > 85 
-            for d in data.get('modules', {}).get('disk', {}).get('disks', []) 
+        'description': 'Verwijdert cache, logs en tijdelijke bestanden',
+        'current_state': lambda data: not any(
+            d.get('percent', 0) > 85
+            for d in data.get('modules', {}).get('disk', {}).get('disks', [])
             if isinstance(d, dict)
         ),
-        'fix': lambda: _fix_disk(),
-        'manual_command': None,
-        'manual_description': 'Open Systeeminstellingen → Algemeen → Opslag om grote bestanden te verwijderen',
+        'turn_on': lambda: _fix_disk(),
+        'turn_off': lambda: {'success': True, 'output': 'Geen actie'},
+        'on_command': None,
+        'off_command': None,
+        'is_action': True,  # One-time action
     },
     'updates_install': {
         'name': 'Systeemupdates installeren',
         'icon': '📥',
         'category': 'verlichting',
-        'severity': 'warning',
-        'description': 'Beschikbare macOS-updates installeren',
-        'check': lambda data: data.get('modules', {}).get('security', {}).get('updates_available', 0) > 0,
-        'fix': lambda: _run_sudo('softwareupdate --install --all'),
-        'manual_command': 'sudo softwareupdate --install --all',
-        'manual_description': 'Open Systeeminstellingen → Software-update',
+        'description': 'Installeert alle beschikbare macOS-updates',
+        'current_state': lambda data: data.get('modules', {}).get('security', {}).get('updates_available', 0) == 0,
+        'turn_on': lambda: _run_sudo('softwareupdate --install --all'),
+        'turn_off': lambda: {'success': True, 'output': 'Updates worden niet geïnstalleerd'},
+        'on_command': 'sudo softwareupdate --install --all',
+        'off_command': None,
+        'is_action': True,  # One-time action
     },
     'dns_flush': {
         'name': 'DNS-cache wissen',
         'icon': '🌐',
         'category': 'uitlaat',
-        'severity': 'info',
-        'description': 'DNS-cache flushen voor snellere netwerkresolutie',
-        'check': lambda data: data.get('modules', {}).get('network', {}).get('dns_response_ms', 0) > 100,
-        'fix': lambda: _run_sudo('dscacheutil -flushcache; sudo killall -HUP mDNSResponder'),
-        'manual_command': 'sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder',
-        'manual_description': 'Flust de DNS-cache',
+        'description': 'Flust de DNS-cache voor snellere naamgeving',
+        'current_state': lambda data: data.get('modules', {}).get('network', {}).get('dns_response_ms', 0) < 50,
+        'turn_on': lambda: _run_sudo('dscacheutil -flushcache; killall -HUP mDNSResponder'),
+        'turn_off': lambda: {'success': True, 'output': 'Geen actie'},
+        'on_command': 'sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder',
+        'off_command': None,
+        'is_action': True,  # One-time action
     },
 }
 
 
 def _fix_zombies():
-    """Kill zombie processes by finding and signaling their parents."""
+    """Kill zombie processes."""
     try:
-        # Find zombie PIDs and their parents
         rc, out, _ = _run("ps aux | awk '$8 ~ /Z/ {print $2, $11}' | head -20")
         zombies = []
         for line in out.strip().split('\n'):
@@ -160,14 +155,13 @@ def _fix_zombies():
         if not zombies:
             return {'action': 'zombie_cleanup', 'success': True, 'output': 'Geen zombies gevonden', 'requires_sudo': False}
         
-        # Try to signal parents to reap
         for zpid in zombies:
             _run(f"kill -9 {zpid} 2>/dev/null")
         
         return {
             'action': 'zombie_cleanup',
             'success': True,
-            'output': f'{len(zombies)} zombie(s) afgesloten',
+            'output': f'{len(zombies)} zombie(s) opgeruimd',
             'requires_sudo': False
         }
     except Exception as e:
@@ -177,20 +171,13 @@ def _fix_zombies():
 def _fix_memory():
     """Free up memory by purging cache."""
     try:
-        # Purge disk cache (needs sudo normally, but let's try)
         rc, out, err = _run('purge')
         if rc == 0:
             return {'action': 'memory_cleanup', 'success': True, 'output': 'Cache geheugen vrijgemaakt', 'requires_sudo': False}
-        # Try sudo
         result = _run_sudo('purge')
         if result.get('success'):
             return {'action': 'memory_cleanup', 'success': True, 'output': 'Cache geheugen vrijgemaakt (sudo)', 'requires_sudo': False}
-        return {
-            'action': 'memory_cleanup',
-            'success': True,
-            'output': 'Memory purge uitgevoerd',
-            'requires_sudo': False
-        }
+        return {'action': 'memory_cleanup', 'success': True, 'output': 'Memory purge uitgevoerd', 'requires_sudo': False}
     except Exception as e:
         return {'action': 'memory_cleanup', 'success': False, 'output': str(e), 'requires_sudo': False}
 
@@ -200,26 +187,16 @@ def _fix_disk():
     freed_mb = 0
     actions = []
     
-    # Clear user caches
-    cache_dir = os.path.expanduser('~/Library/Caches')
-    try:
-        before = sum(
-            os.path.getsize(os.path.join(cache_dir, f))
-            for f in os.listdir(cache_dir)
-            if os.path.isfile(os.path.join(cache_dir, f))
-        ) // (1024 * 1024)
-    except:
-        before = 0
-    
     # Clear system tmp
     try:
         tmp_dir = '/tmp'
         for item in os.listdir(tmp_dir):
             item_path = os.path.join(tmp_dir, item)
             try:
-                if os.path.isfile(item_path):
+                if os.path.isfile(item_path) and not item.startswith('.'):
+                    sz = os.path.getsize(item_path)
                     os.remove(item_path)
-                    freed_mb += os.path.getsize(item_path) // (1024 * 1024)
+                    freed_mb += sz // (1024 * 1024)
             except:
                 pass
         actions.append('Tijdelijke bestanden opgeschoond')
@@ -243,103 +220,134 @@ def _fix_disk():
     except:
         pass
     
-    # Brew cleanup (if installed)
+    # Brew cleanup
     rc, _, _ = _run('which brew')
     if rc == 0:
-        rc2, out2, _ = _run('brew cleanup --prune=all 2>&1 | tail -1')
-        if rc2 == 0:
-            actions.append('Homebrew cache opgeschoond')
+        _run('brew cleanup --prune=all 2>&1')
+        actions.append('Homebrew cache opgeschoond')
     
     return {
         'action': 'disk_cleanup',
         'success': True,
-        'output': f'Opschoning klaar. {freed_mb} MB vrijgemaakt. ' + '; '.join(actions),
+        'output': f'Opschoning klaar. ~{freed_mb} MB vrijgemaakt. ' + '; '.join(actions),
         'requires_sudo': False
     }
 
 
-def get_available_repairs(check_data):
-    """Given check data, return list of repairs that could be run."""
-    available = []
+def get_toggles(check_data):
+    """Get all toggles with their current state for the dashboard."""
+    result = []
     
-    for repair_id, repair in REPAIRS.items():
+    for toggle_id, toggle in TOGGLES.items():
         try:
-            if repair['check'](check_data):
-                available.append({
-                    'id': repair_id,
-                    'name': repair['name'],
-                    'icon': repair['icon'],
-                    'category': repair['category'],
-                    'severity': repair['severity'],
-                    'description': repair['description'],
-                    'manual_command': repair.get('manual_command'),
-                    'manual_description': repair.get('manual_description'),
-                })
+            current = toggle['current_state'](check_data)
+            is_action = toggle.get('is_action', False)
+            
+            entry = {
+                'id': toggle_id,
+                'name': toggle['name'],
+                'icon': toggle['icon'],
+                'category': toggle['category'],
+                'description': toggle['description'],
+                'is_action': is_action,
+                'requires_sudo': toggle.get('requires_sudo', False),
+                'requires_recovery': toggle.get('requires_recovery', False),
+            }
+            
+            if is_action:
+                # One-time actions: show if relevant
+                entry['state'] = None  # Not a toggle, no on/off state
+                entry['available'] = True  # Always show action buttons
+            else:
+                # Real toggles: show current on/off state
+                entry['state'] = 'on' if current else 'off' if current is False else 'unknown'
+                entry['available'] = True
+            
+            if toggle.get('on_command'):
+                entry['on_command'] = toggle['on_command']
+            if toggle.get('off_command'):
+                entry['off_command'] = toggle['off_command']
+            
+            result.append(entry)
         except Exception:
-            continue  # Skip repairs that can't be checked
+            continue
     
-    return available
+    return result
 
 
-def run_repair(repair_id, check_data=None):
-    """Run a specific repair action by ID."""
-    repair = REPAIRS.get(repair_id)
-    if not repair:
-        return {'success': False, 'error': f'Onbekende reparatie: {repair_id}'}
+def run_toggle(toggle_id, action, check_data=None):
+    """Toggle a setting ON or OFF, or run a one-time action.
     
-    # Verify it still needs fixing
-    if check_data:
-        try:
-            if not repair['check'](check_data):
-                return {
-                    'id': repair_id,
-                    'name': repair['name'],
-                    'success': True,
-                    'already_fixed': True,
-                    'message': 'Dit probleem is al opgelost!',
-                }
-        except:
-            pass  # Run anyway if we can't check
+    Args:
+        toggle_id: The toggle identifier (e.g. 'firewall')
+        action: 'on', 'off', or 'run' (for one-time actions)
+        check_data: Current check data for state verification
+    """
+    toggle = TOGGLES.get(toggle_id)
+    if not toggle:
+        return {'success': False, 'error': f'Onbekende schakelaar: {toggle_id}'}
     
-    # Execute the fix
+    is_action = toggle.get('is_action', False)
+    
     try:
-        result = repair['fix']()
+        if is_action and action == 'run':
+            result = toggle['turn_on']()
+        elif action == 'on':
+            result = toggle['turn_on']()
+        elif action == 'off':
+            result = toggle['turn_off']()
+        else:
+            return {'success': False, 'error': f'Ongeldige actie: {action}'}
+        
         if isinstance(result, dict):
-            result['id'] = repair_id
-            result['name'] = repair['name']
-            result['icon'] = repair.get('icon', '🔧')
+            result['id'] = toggle_id
+            result['name'] = toggle['name']
+            result['icon'] = toggle.get('icon', '🔧')
+            if is_action:
+                result['action_type'] = 'action'
+            else:
+                result['action_type'] = 'toggle'
+                result['new_state'] = action
             return result
+        
         return {
-            'id': repair_id,
-            'name': repair['name'],
-            'icon': repair.get('icon', '🔧'),
+            'id': toggle_id,
+            'name': toggle['name'],
+            'icon': toggle.get('icon', '🔧'),
             'success': False,
-            'message': 'Reparatie kon niet worden uitgevoerd',
+            'message': 'Actie kon niet worden uitgevoerd',
+            'action_type': 'action' if is_action else 'toggle',
+            'new_state': action,
         }
     except Exception as e:
         return {
-            'id': repair_id,
-            'name': repair['name'],
-            'icon': repair.get('icon', '🔧'),
+            'id': toggle_id,
+            'name': toggle['name'],
+            'icon': toggle.get('icon', '🔧'),
             'success': False,
             'error': str(e),
         }
 
 
+# ─── Backward compat ─────────────────────────────────────────────
+def get_available_repairs(check_data):
+    """Backward compat: returns toggles as 'repairs' for the API."""
+    return get_toggles(check_data)
+
+
+def run_repair(repair_id, check_data=None):
+    """Backward compat: run a toggle action."""
+    return run_toggle(repair_id, 'on', check_data)
+
+
 def run_all_repairs(check_data):
-    """Run all applicable repairs and return results."""
+    """Run all one-time actions and return results."""
     results = []
-    for repair_id, repair in REPAIRS.items():
-        try:
-            if repair['check'](check_data):
-                result = run_repair(repair_id, check_data)
+    for toggle_id, toggle in TOGGLES.items():
+        if toggle.get('is_action', False):
+            try:
+                result = run_toggle(toggle_id, 'run', check_data)
                 results.append(result)
-        except Exception as e:
-            results.append({
-                'id': repair_id,
-                'name': repair['name'],
-                'icon': repair.get('icon', '🔧'),
-                'success': False,
-                'error': str(e),
-            })
+            except Exception as e:
+                results.append({'id': toggle_id, 'name': toggle['name'], 'success': False, 'error': str(e)})
     return results

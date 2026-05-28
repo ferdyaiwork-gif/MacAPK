@@ -60,12 +60,13 @@
         <h3>⚠️ Aanbevolen Acties</h3>
         <ul id="aanbevolenList"></ul>
     </div>
-    <!-- Reparatie knoppen -->
+    <!-- Reparatie & Instellingen — Toggle switches -->
     <div class="acties-card reparatie" id="repairCard" style="display:none;">
-        <h3>🔧 Repareren — Automatisch Oplossen</h3>
+        <h3>🔧 Instellingen & Acties</h3>
+        <p class="repair-subtitle">Schakel in of uit — jij bepaalt wat je Mac soepel houdt</p>
         <div id="repairList"></div>
-        <button class="btn btn-repair-all" onclick="repairAll()" id="repairAllBtn">
-            🔧 Alles Repareren
+        <button class="btn btn-repair-all" onclick="runAllActions()" id="repairAllBtn">
+            ⚡ Alle Acties Uitvoeren
         </button>
     </div>
 </div>

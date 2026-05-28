@@ -266,8 +266,9 @@ select.history-select {
 .acties-card.verplicht li::before { content: '🚨'; position: absolute; left: 0; }
 .acties-card.aanbevolen li::before { content: '💡'; position: absolute; left: 0; }
 
-/* ─── Repair buttons ────────────────────────────────────── */
+/* ─── Repair / Toggle switches ───────────────────────────── */
 .acties-card.reparatie { border-color: rgba(88,166,255,0.4); background: rgba(88,166,255,0.04); }
+.repair-subtitle { font-size: 12.5px; color: var(--text-secondary); margin: -6px 0 12px; }
 .repair-item {
     display: flex; align-items: center; gap: 10px;
     padding: 10px 12px; margin-bottom: 8px;
@@ -286,17 +287,37 @@ select.history-select {
 .repair-item .repair-severity.critical { background: rgba(248,81,73,0.15); color: var(--red); }
 .repair-item .repair-severity.warning { background: rgba(210,153,34,0.15); color: var(--yellow); }
 .repair-item .repair-severity.info { background: rgba(88,166,255,0.15); color: var(--accent); }
-.btn-repair-single {
+
+/* Toggle switch */
+.toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(255,255,255,0.12); transition: .3s; border-radius: 24px;
+}
+.toggle-slider:before {
+    position: absolute; content: ""; height: 18px; width: 18px;
+    left: 3px; bottom: 3px; background-color: #fff; transition: .3s; border-radius: 50%;
+}
+.toggle-switch input:checked + .toggle-slider { background-color: var(--green); }
+.toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); }
+.toggle-switch input:disabled + .toggle-slider { opacity: 0.35; cursor: not-allowed; }
+.toggle-switch.sudo .toggle-slider { background-color: var(--yellow); }
+.toggle-switch.sudo input:checked + .toggle-slider { background-color: var(--yellow); }
+
+/* Action button (for one-time actions) */
+.btn-action {
     padding: 6px 14px; border-radius: 8px; border: none; cursor: pointer;
     font-size: 12px; font-weight: 600; transition: var(--transition);
     background: linear-gradient(135deg, #238636, #2ea043); color: #fff;
-    white-space: nowrap; font-family: inherit;
+    white-space: nowrap; font-family: inherit; flex-shrink: 0;
 }
-.btn-repair-single:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(46,160,67,0.4); }
-.btn-repair-single:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-.btn-repair-single.running { background: var(--yellow); color: #000; }
-.btn-repair-single.done { background: var(--green); }
-.btn-repair-single.failed { background: var(--red); }
+.btn-action:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(46,160,67,0.4); }
+.btn-action:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn-action.running { background: var(--yellow); color: #000; }
+.btn-action.done { background: var(--green); }
+.btn-action.failed { background: var(--red); }
+
 .btn-repair-all {
     width: 100%; padding: 12px 20px; border-radius: 10px; border: none; cursor: pointer;
     font-size: 14px; font-weight: 700; transition: var(--transition);
@@ -320,6 +341,7 @@ select.history-select {
     font-family: 'SF Mono', monospace; background: rgba(88,166,255,0.08);
     padding: 4px 8px; border-radius: 6px; display: inline-block;
 }
+.toggle-label { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; min-width: 24px; text-align: center; }
 
 /* ─── Score Row (secondary) ────────────────────────────── */
 .score-row { display: flex; align-items: flex-start; gap: 24px; padding: 0 28px 8px; }

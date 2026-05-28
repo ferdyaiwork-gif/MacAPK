@@ -407,126 +407,191 @@ window.addEventListener('DOMContentLoaded', () => {
 
 window.addEventListener('resize', () => { if (currentData) loadHistory(); });
 
-// ─── Repairs ─────────────────────────────────────────────
+// ─── Toggles & Actions ──────────────────────────────────────
 async function loadRepairs() {
     try {
-        const resp = await fetch(`${API}/api/repairs`);
+        const resp = await fetch(`${API}/api/toggles`);
         if (!resp.ok) return;
         const data = await resp.json();
-        renderRepairs(data.repairs);
+        renderRepairs(data.toggles);
     } catch (e) {
-        console.error('Fout bij laden reparaties:', e);
+        console.error('Fout bij laden toggles:', e);
     }
 }
 
-function renderRepairs(repairs) {
+function renderRepairs(toggles) {
     const card = document.getElementById('repairCard');
     const list = document.getElementById('repairList');
     const allBtn = document.getElementById('repairAllBtn');
     
-    if (!repairs || repairs.length === 0) {
+    if (!toggles || toggles.length === 0) {
         card.style.display = 'none';
         return;
     }
     
     card.style.display = 'block';
     list.innerHTML = '';
+    let actionCount = 0;
     
-    repairs.forEach(r => {
+    toggles.forEach(t => {
         const item = document.createElement('div');
         item.className = 'repair-item';
-        item.id = `repair-${r.id}`;
-        const severityClass = r.severity === 'critical' ? 'critical' : r.severity === 'warning' ? 'warning' : 'info';
-        const severityLabel = r.severity === 'critical' ? 'Kritiek' : r.severity === 'warning' ? 'Waarschuwing' : 'Info';
+        item.id = `repair-${t.id}`;
         
-        item.innerHTML = `
-            <div class="repair-icon">${r.icon}</div>
-            <div class="repair-info">
-                <div class="repair-name">${r.name}</div>
-                <div class="repair-desc">${r.description}</div>
-                <span class="repair-severity ${severityClass}">${severityLabel}</span>
-            </div>
-            <button class="btn-repair-single" onclick="repairSingle('${r.id}')" id="btn-repair-${r.id}">
-                🔧 Fix
-            </button>
-        `;
+        if (t.is_action) {
+            // One-time action: show button
+            actionCount++;
+            item.innerHTML = `
+                <div class="repair-icon">${t.icon}</div>
+                <div class="repair-info">
+                    <div class="repair-name">${t.name}</div>
+                    <div class="repair-desc">${t.description}</div>
+                </div>
+                <button class="btn-action" onclick="runAction('${t.id}')" id="btn-${t.id}">
+                    ⚡ Uitvoeren
+                </button>
+            `;
+        } else {
+            // Toggle switch: on/off
+            const isOn = t.state === 'on';
+            const isUnknown = t.state === 'unknown';
+            const isSudo = t.requires_sudo;
+            const stateLabel = isOn ? 'Aan' : isUnknown ? '?' : 'Uit';
+            const toggleClass = isSudo ? 'toggle-switch sudo' : 'toggle-switch';
+            
+            item.innerHTML = `
+                <div class="repair-icon">${t.icon}</div>
+                <div class="repair-info">
+                    <div class="repair-name">${t.name}${isSudo ? ' 🔒' : ''}</div>
+                    <div class="repair-desc">${t.description}</div>
+                </div>
+                <span class="toggle-label">${stateLabel}</span>
+                <label class="${toggleClass}" title="${isSudo ? 'Vereist sudo-wachtwoord' : ''}">
+                    <input type="checkbox" ${isOn ? 'checked' : ''} ${isUnknown ? '' : ''}
+                        onchange="toggleSetting('${t.id}', this.checked ? 'on' : 'off')" id="toggle-${t.id}">
+                    <span class="toggle-slider"></span>
+                </label>
+            `;
+        }
+        
         list.appendChild(item);
     });
     
-    allBtn.style.display = repairs.length > 1 ? 'flex' : 'none';
+    // Show "Run All Actions" button only if there are actions
+    allBtn.style.display = actionCount > 0 ? 'flex' : 'none';
 }
 
-async function repairSingle(repairId) {
-    const btn = document.getElementById(`btn-repair-${repairId}`);
-    if (btn.disabled) return;
-    
-    btn.disabled = true;
-    btn.className = 'btn-repair-single running';
-    btn.textContent = '⏳ Bezig...';
+async function toggleSetting(toggleId, action) {
+    const toggle = document.getElementById(`toggle-${toggleId}`);
+    const label = toggle.closest('.repair-item').querySelector('.toggle-label');
     
     try {
         const resp = await fetch(`${API}/api/repair`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: repairId })
+            body: JSON.stringify({ id: toggleId, action: action })
         });
         const data = await resp.json();
-        
         const result = data.repair || data;
-        const item = document.getElementById(`repair-${repairId}`);
         
-        // Show result
-        let outputHtml = '';
-        if (result.success === true || result.already_fixed) {
-            btn.className = 'btn-repair-single done';
-            btn.textContent = result.already_fixed ? '✅ Al gefikst' : '✅ Gerepareerd';
-            outputHtml = `<div class="repair-output success">${result.already_fixed ? '✅ Al opgelost!' : (result.output || '✅ Succesvol gerepareerd!')}</div>`;
+        if (result.success) {
+            label.textContent = action === 'on' ? 'Aan' : 'Uit';
         } else if (result.requires_sudo) {
-            btn.className = 'btn-repair-single failed';
-            btn.textContent = '🔒 Sudo nodig';
-            outputHtml = `
+            // Show sudo command
+            label.textContent = '🔒 Sudo';
+            const item = document.getElementById(`repair-${toggleId}`);
+            const infoDiv = item.querySelector('.repair-info');
+            infoDiv.insertAdjacentHTML('afterend', `
                 <div class="repair-output sudo">
-                    ⚠️ Vereist beheerdersrechten (sudo).<br>
-                    Kopieer dit commando naar Terminal:<br>
-                    <span class="repair-manual">${result.sudo_command || result.manual_command || ''}</span>
-                </div>`;
+                    ⚠️ Vereist sudo. Voer uit in Terminal:<br>
+                    <span class="repair-manual">${result.sudo_command || ''}</span>
+                </div>
+            `);
+            toggle.checked = !toggle.checked; // revert
+            label.textContent = toggle.checked ? 'Aan' : 'Uit';
         } else {
-            btn.className = 'btn-repair-single failed';
-            btn.textContent = '❌ Mislukt';
-            outputHtml = `<div class="repair-output failed">❌ ${result.error || result.message || 'Reparatie mislukt'}</div>`;
-            // Also show manual instruction if available
-            if (result.manual_description || result.manual_command) {
-                outputHtml += `<div class="repair-output sudo">💡 Handmatig: ${result.manual_description || ''}<br>${result.manual_command ? `<span class="repair-manual">${result.manual_command}</span>` : ''}</div>`;
-            }
+            toggle.checked = !toggle.checked; // revert on failure
+            label.textContent = toggle.checked ? 'Aan' : 'Uit';
+            const item = document.getElementById(`repair-${toggleId}`);
+            const infoDiv = item.querySelector('.repair-info');
+            infoDiv.insertAdjacentHTML('afterend', `
+                <div class="repair-output failed">❌ ${result.error || result.message || 'Actie mislukt'}</div>
+            `);
         }
         
-        // Add output after the repair-info div
-        const infoDiv = item.querySelector('.repair-info');
-        infoDiv.insertAdjacentHTML('afterend', outputHtml);
-        
-        // If there's new check data, update the dashboard
+        // Update dashboard if new check data
         if (data.new_check) {
             currentData = data.new_check;
             updateScore(data.new_check.scores.overall, data.new_check.scores.overall_status);
             renderKeuring(data.new_check);
             renderModules(data.new_check);
             updateStatus(data.new_check);
-            // Reload repairs in case some are now fixed
-            setTimeout(loadRepairs, 1000);
+            setTimeout(loadRepairs, 500);
         }
     } catch (e) {
-        btn.className = 'btn-repair-single failed';
-        btn.textContent = '❌ Fout';
-        console.error('Repair error:', e);
+        toggle.checked = !toggle.checked;
+        label.textContent = toggle.checked ? 'Aan' : 'Uit';
+        console.error('Toggle error:', e);
     }
 }
 
-async function repairAll() {
+async function runAction(actionId) {
+    const btn = document.getElementById(`btn-${actionId}`);
+    if (btn.disabled) return;
+    
+    btn.disabled = true;
+    btn.className = 'btn-action running';
+    btn.textContent = '⏳ Bezig...';
+    
+    try {
+        const resp = await fetch(`${API}/api/repair`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: actionId, action: 'run' })
+        });
+        const data = await resp.json();
+        const result = data.repair || data;
+        
+        if (result.success === true || result.already_fixed) {
+            btn.className = 'btn-action done';
+            btn.textContent = result.already_fixed ? '✅ Klaar' : '✅ Gedaan';
+        } else if (result.requires_sudo) {
+            btn.className = 'btn-action failed';
+            btn.textContent = '🔒 Sudo';
+            const item = document.getElementById(`repair-${actionId}`);
+            const infoDiv = item.querySelector('.repair-info');
+            infoDiv.insertAdjacentHTML('afterend', `
+                <div class="repair-output sudo">
+                    ⚠️ Vereist sudo. Voer uit in Terminal:<br>
+                    <span class="repair-manual">${result.sudo_command || ''}</span>
+                </div>
+            `);
+        } else {
+            btn.className = 'btn-action failed';
+            btn.textContent = '❌ Mislukt';
+        }
+        
+        if (data.new_check) {
+            currentData = data.new_check;
+            updateScore(data.new_check.scores.overall, data.new_check.scores.overall_status);
+            renderKeuring(data.new_check);
+            renderModules(data.new_check);
+            updateStatus(data.new_check);
+            setTimeout(loadRepairs, 1000);
+        }
+    } catch (e) {
+        btn.className = 'btn-action failed';
+        btn.textContent = '❌ Fout';
+        console.error('Action error:', e);
+    }
+}
+
+async function runAllActions() {
     const allBtn = document.getElementById('repairAllBtn');
     if (allBtn.disabled) return;
     
     allBtn.disabled = true;
-    allBtn.textContent = '⏳ Alle reparaties uitvoeren...';
+    allBtn.textContent = '⏳ Acties uitvoeren...';
     
     try {
         const resp = await fetch(`${API}/api/repair`, {
@@ -537,13 +602,10 @@ async function repairAll() {
         const data = await resp.json();
         
         if (data.repairs) {
-            let successCount = data.repairs.filter(r => r.success).length;
-            let total = data.repairs.length;
-            allBtn.textContent = `✅ ${successCount}/${total} gerepareerd`;
-            allBtn.className = 'btn-repair-all';
+            let ok = data.repairs.filter(r => r.success).length;
+            allBtn.textContent = `✅ ${ok}/${data.repairs.length} voltooid`;
         }
         
-        // Update dashboard with new check data
         if (data.new_check) {
             currentData = data.new_check;
             updateScore(data.new_check.scores.overall, data.new_check.scores.overall_status);
@@ -552,10 +614,9 @@ async function repairAll() {
             updateStatus(data.new_check);
         }
         
-        // Reload repairs
         setTimeout(loadRepairs, 1500);
     } catch (e) {
-        allBtn.textContent = '❌ Fout bij repareren';
-        console.error('Repair all error:', e);
+        allBtn.textContent = '❌ Fout bij acties';
+        console.error('Run all error:', e);
     }
 }

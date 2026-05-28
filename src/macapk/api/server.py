@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from macapk.engine import run_check, calculate_score
-from macapk.repair import get_available_repairs, run_repair, run_all_repairs
+from macapk.repair import get_available_repairs, run_repair, run_all_repairs, run_toggle, get_toggles
 from macapk.storage.history import HistoryDB
 
 # Global state
@@ -101,10 +101,15 @@ class MacAPKHandler(BaseHTTPRequestHandler):
             with _cached_lock:
                 self._send_json(_cached_result or {'status': 'no_data'})
         elif path == '/api/repairs':
-            # GET /api/repairs — list available repairs based on latest check
+            # GET /api/repairs — list available toggles/repairs based on latest check
             with _cached_lock:
-                repairs = get_available_repairs(_cached_result or {})
-            self._send_json({'repairs': repairs})
+                toggles = get_available_repairs(_cached_result or {})
+            self._send_json({'repairs': toggles})
+        elif path == '/api/toggles':
+            # GET /api/toggles — list all toggles with current state
+            with _cached_lock:
+                toggles = get_toggles(_cached_result or {})
+            self._send_json({'toggles': toggles})
         else:
             # Serve static files from UI dir
             filepath = os.path.join(UI_DIR, path.lstrip('/'))
@@ -131,19 +136,19 @@ class MacAPKHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({'error': str(e), 'status': 'error'}, 500)
         elif self.path == '/api/repair':
-            # POST /api/repair — run a specific repair or all repairs
+            # POST /api/repair — run a specific repair, toggle, or all repairs
             content_len = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_len) if content_len else b''
             try:
                 params = json.loads(body) if body else {}
                 repair_id = params.get('id', '')
+                action = params.get('action', 'on')  # 'on', 'off', or 'run'
                 
                 with _cached_lock:
                     check_data = _cached_result or {}
                 
                 if repair_id == 'all':
                     results = run_all_repairs(check_data)
-                    # Re-run check after repairs
                     new_check = run_check()
                     with _cached_lock:
                         _cached_result = new_check
@@ -151,8 +156,16 @@ class MacAPKHandler(BaseHTTPRequestHandler):
                     db.save(new_check)
                     self._send_json({'repairs': results, 'new_check': new_check})
                 elif repair_id:
-                    result = run_repair(repair_id, check_data)
-                    # Re-run check after repair
+                    # Check if it's a toggle or one-time action
+                    from macapk.repair import TOGGLES
+                    toggle = TOGGLES.get(repair_id)
+                    if toggle and not toggle.get('is_action', False):
+                        # It's a real toggle — use 'on' or 'off'
+                        result = run_toggle(repair_id, action, check_data)
+                    else:
+                        # It's a one-time action
+                        result = run_repair(repair_id, check_data)
+                    # Re-run check after action
                     new_check = run_check()
                     with _cached_lock:
                         _cached_result = new_check
